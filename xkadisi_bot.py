@@ -31,7 +31,7 @@ grok_client = OpenAI(
 processed_mentions = set()
 
 def get_fetva(soru):
-           prompt = f"""
+    prompt = f"""
 Kullanıcı sorusu: {soru}
 
 Dört büyük Sünni mezhebine göre ÇOK KISA hüküm ver.
@@ -47,4 +47,5 @@ Hanbelî: [hüküm] (el-Muğnî)
 
 Bu genel bilgilendirmedir, mutlak fetva değildir. Lütfen @abdulazizguven'e danışın.
 
-Tüm cevap Türkçe olsun. Toplam (bu satırlarla birlikte) 230 karakteri geçmesin."""
+Tüm cevap Türkçe olsun. Toplam (bu satırlarla birlikte) 230 karakteri geçmesin.
+    """
