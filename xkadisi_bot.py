@@ -24,7 +24,6 @@ CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
 ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
-
 # Tweepy client
 client = tweepy.Client(
     bearer_token=BEARER_TOKEN,
@@ -33,31 +32,32 @@ client = tweepy.Client(
     access_token=ACCESS_TOKEN,
     access_token_secret=ACCESS_TOKEN_SECRET
 )
-print("Tweepy client oluşturuluyor...")
+
+print("Tweepy client oluşturuldu, test ediliyor...")
 try:
     me = client.get_me()
-    print("Twitter hesabı başarıyla bağlandı:", me.data.username)
+    print("Twitter bağlantısı başarılı! Hesap: @" + me.data.username)
 except Exception as e:
     print("Twitter bağlantı hatası:", str(e))
-print("Tweepy client hazır!")
-print("Grok client oluşturuluyor...")
-try:
-    # Basit bir test çağrısı
-    test = grok_client.chat.completions.create(
-        model="grok-4",
-        messages=[{"role": "user", "content": "Merhaba"}],
-        max_tokens=10
-    )
-    print("Grok API test başarılı!")
-except Exception as e:
-    print("Grok API hatası:", str(e))
+
 # Grok client
 grok_client = OpenAI(
     api_key=GROK_API_KEY,
     base_url="https://api.x.ai/v1"
 )
 
-processed_mentions = set()
+print("Grok client oluşturuldu, test ediliyor...")
+try:
+    test = grok_client.chat.completions.create(
+        model="grok-4",
+        messages=[{"role": "user", "content": "Merhaba"}],
+        max_tokens=5
+    )
+    print("Grok API bağlantısı başarılı!")
+except Exception as e:
+    print("Grok API hatası:", str(e))
+
+print("Tüm bağlantılar tamam, bot başlıyor...")
 
 def get_fetva(soru):
     prompt = f"""
