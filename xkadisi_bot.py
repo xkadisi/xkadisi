@@ -5,7 +5,7 @@ from openai import OpenAI
 import time
 import os
 
-# Key'ler Render Environment Variables'dan çekiliyor
+# Key'ler
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN")
 CONSUMER_KEY = os.environ.get("CONSUMER_KEY")
 CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
@@ -34,27 +34,27 @@ def get_fetva(soru):
     prompt = f"""
 Kullanıcı sorusu: {soru}
 
-Dört büyük Sünni mezhebine göre ÇOK KISA hüküm ver.
-Her mezhep için: Sadece hüküm + parantez içinde klasik kaynak adı.
-Maksimum 12-15 kelime/mezhep. Açıklama yazma.
+Dört büyük Sünni mezhebine göre detaylı ama anlaşılır fetva ver.
+Her mezhep için hükmü ve kısa kaynak belirt.
+Açıklama ekleyebilirsin ama abartma.
 
-Tam format (başka hiçbir şey ekleme):
+Format:
 
-Hanefi: [hüküm] (el-Hidâye)
-Şafiî: [hüküm] (el-Mecmû')
-Mâlikî: [hüküm] (Muvatta)
-Hanbelî: [hüküm] (el-Muğnî)
+Hanefi: [detaylı hüküm] (el-Hidâye)
+Şafiî: [detaylı hüküm] (el-Mecmû')
+Mâlikî: [detaylı hüküm] (Muvatta)
+Hanbelî: [detaylı hüküm] (el-Muğnî)
 
 Bu genel bilgilendirmedir, mutlak fetva değildir. Lütfen @abdulazizguven'e danışın.
 
-Tüm cevap Türkçe olsun. Toplam (bu satırlarla birlikte) 230 karakteri geçmesin.
+Tüm cevap Türkçe olsun.
 """
     try:
         response = grok_client.chat.completions.create(
             model="grok-4",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=250,
-            temperature=0.2
+            max_tokens=800,  # Daha uzun cevap için artırdık
+            temperature=0.3
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -70,11 +70,11 @@ def cevap_ver():
             tweet_fields=["author_id"]
         )
     except tweepy.TooManyRequests as e:
-        print("Rate limit doldu (mention çekme), 15 dakika bekleniyor...")
+        print("Rate limit doldu, 15 dakika bekleniyor...")
         time.sleep(900)
         return
     except Exception as e:
-        print(f"Mention çekme hatası: {e}")
+        print(f"Mention hatası: {e}")
         time.sleep(60)
         return
 
@@ -98,22 +98,22 @@ def cevap_ver():
 
         cevap = f"Merhaba!\n\n{fetva}"
 
-        if len(cevap) > 280:
-            cevap = cevap[:277] + "..."
+        # Premium sayesinde 25.000 karakter sınırı var, kesme gerekmez
+        # Ama çok uzun olursa thread yapabiliriz (şimdilik tek tweet)
 
         try:
             client.create_tweet(text=cevap, in_reply_to_tweet_id=mention.id)
-            print("Cevap gönderildi!\n")
+            print("Uzun cevap gönderildi!\n")
         except tweepy.TooManyRequests as e:
-            print("Rate limit doldu (tweet atma), 15 dakika bekleniyor...")
+            print("Rate limit (tweet), bekleniyor...")
             time.sleep(900)
         except Exception as e:
-            print(f"Tweet atma hatası: {e}")
+            print(f"Tweet hatası: {e}")
 
         processed_mentions.add(mention.id)
         time.sleep(5)
 
-print("XKadisi botu başlatıldı! Mention'lar dinleniyor...")
+print("XKadisi botu başlatıldı! (Premium uzun cevap versiyonu)")
 while True:
     cevap_ver()
     time.sleep(60)
