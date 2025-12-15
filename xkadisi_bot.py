@@ -24,7 +24,13 @@ CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
 ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
-
+print("Tweepy client oluşturuluyor...")
+try:
+    me = client.get_me()
+    print("Twitter hesabı başarıyla bağlandı:", me.data.username)
+except Exception as e:
+    print("Twitter bağlantı hatası:", str(e))
+print("Tweepy client hazır!")
 # Tweepy client
 client = tweepy.Client(
     bearer_token=BEARER_TOKEN,
@@ -33,7 +39,17 @@ client = tweepy.Client(
     access_token=ACCESS_TOKEN,
     access_token_secret=ACCESS_TOKEN_SECRET
 )
-
+print("Grok client oluşturuluyor...")
+try:
+    # Basit bir test çağrısı
+    test = grok_client.chat.completions.create(
+        model="grok-4",
+        messages=[{"role": "user", "content": "Merhaba"}],
+        max_tokens=10
+    )
+    print("Grok API test başarılı!")
+except Exception as e:
+    print("Grok API hatası:", str(e))
 # Grok client
 grok_client = OpenAI(
     api_key=GROK_API_KEY,
