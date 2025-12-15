@@ -5,7 +5,10 @@ from openai import OpenAI
 import time
 import os
 import logging
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from http.client import RemoteDisconnected
 
+# Logging ayarları - Render logs daha okunaklı olsun
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -17,13 +20,15 @@ ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
 
-# Key kontrol
-if not all([BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, GROK_API_KEY]):
-    logger.error("Eksik API key! Render Environment Variables'ı kontrol et.")
+# Key kontrol - eksik varsa bot durur
+required_keys = [BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, GROK_API_KEY]
+if any(key is None for key in required_keys):
+    logger.error("Eksik API key var! Render Environment Variables'ı kontrol edin.")
     exit(1)
 
-logger.info("Tüm key'ler yüklendi, bot başlatılıyor...")
+logger.info("Tüm key'ler başarıyla yüklendi.")
 
+# Tweepy client
 client = tweepy.Client(
     bearer_token=BEARER_TOKEN,
     consumer_key=CONSUMER_KEY,
@@ -32,9 +37,13 @@ client = tweepy.Client(
     access_token_secret=ACCESS_TOKEN_SECRET
 )
 
-grok_client = OpenAI(api_key=GROK_API_KEY, base_url="https://api.x.ai/v1")
+# Grok client
+grok_client = OpenAI(
+    api_key=GROK_API_KEY,
+    base_url="https://api.x.ai/v1"
+)
 
-processed_mentions = set()  # Dosya yok, sadece hafızada (restart’ta sıfırlanır)
+processed_mentions = set()  # Restart'ta sıfırlanır (duplicate önler)
 
 def get_fetva(soru):
     prompt = f"""
@@ -61,6 +70,7 @@ Tüm cevap Türkçe olsun.
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
+        logger.error(f"Grok hatası: {e}")
         return f"Şu anda fetva üretilemedi: {str(e)}"
 
 def cevap_ver():
@@ -68,7 +78,7 @@ def cevap_ver():
     try:
         mentions = client.get_users_mentions(
             client.get_me().data.id,
-            max_results=5,
+            max_results=5,  # Rate limit için düşük tut
             tweet_fields=["author_id"]
         )
     except tweepy.TooManyRequests as e:
@@ -77,9 +87,13 @@ def cevap_ver():
         logger.warning(f"Rate limit! {wait} saniye bekleniyor...")
         time.sleep(wait)
         return
+    except (ConnectionResetError, RequestsConnectionError, RemoteDisconnected, ConnectionAbortedError) as e:
+        logger.warning(f"Bağlantı kesildi: {e}. 90 saniye beklenip tekrar denenecek...")
+        time.sleep(90)
+        return
     except Exception as e:
-        logger.error(f"Mention hatası: {e}")
-        time.sleep(60)
+        logger.error(f"Beklenmedik mention hatası: {e}")
+        time.sleep(120)
         return
 
     if not mentions.data:
@@ -93,7 +107,8 @@ def cevap_ver():
         try:
             user = client.get_user(id=mention.author_id)
             username = user.data.username if user.data else "biri"
-        except:
+        except Exception as e:
+            logger.warning(f"User lookup hatası: {e}")
             username = "biri"
 
         soru = mention.text.lower().replace("@xkadisi", "").strip()
@@ -108,15 +123,18 @@ def cevap_ver():
             client.create_tweet(text=cevap, in_reply_to_tweet_id=mention.id)
             logger.info("Cevap gönderildi!")
         except tweepy.TooManyRequests as e:
-            logger.warning("Tweet rate limit, 15 dk bekleniyor...")
+            logger.warning("Tweet rate limit, 15 dakika bekleniyor...")
             time.sleep(900)
+        except (ConnectionResetError, RequestsConnectionError, RemoteDisconnected) as e:
+            logger.warning(f"Tweet bağlantı hatası: {e}. 90 saniye bekleniyor...")
+            time.sleep(90)
         except Exception as e:
             logger.error(f"Tweet hatası: {e}")
 
         processed_mentions.add(mention.id)
-        time.sleep(10)
+        time.sleep(10)  # Cevaplar arası güvenli bekleme
 
 logger.info("XKadisi botu BAŞARIYLA başlatıldı! Mention'lar dinleniyor...")
 while True:
     cevap_ver()
-    time.sleep(90)  # Rate limit için 90 saniye
+    time.sleep(120)  # Rate limit için 2 dakika polling
