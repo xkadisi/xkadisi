@@ -31,4 +31,21 @@ grok_client = OpenAI(
 processed_mentions = set()
 
 def get_fetva(soru):
-    prompt = f"""
+       prompt = f"""
+Kullanıcı sorusu: {soru}
+
+Dört büyük Sünni mezhebine göre ÇOK KISA hüküm ver.
+Her mezhep için: Sadece hüküm + parantez içinde klasik kaynak adı.
+Maksimum 12-15 kelime/mezhep. Açıklama yazma.
+
+Tam format (başka hiçbir şey ekleme):
+
+Hanefi: [hüküm] (el-Hidâye)
+Şafiî: [hüküm] (el-Mecmû')
+Mâlikî: [hüküm] (Muvatta)
+Hanbelî: [hüküm] (el-Muğnî)
+
+Bu genel bilgilendirmedir, mutlak fetva değildir. Lütfen @abdulazizguven'e danışın.
+
+Tüm cevap Türkçe olsun. Toplam (bu satırlarla birlikte) 230 karakteri geçmesin.
+"""
