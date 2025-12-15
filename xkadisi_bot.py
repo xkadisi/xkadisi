@@ -24,13 +24,7 @@ CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
 ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
-print("Tweepy client oluşturuluyor...")
-try:
-    me = client.get_me()
-    print("Twitter hesabı başarıyla bağlandı:", me.data.username)
-except Exception as e:
-    print("Twitter bağlantı hatası:", str(e))
-print("Tweepy client hazır!")
+
 # Tweepy client
 client = tweepy.Client(
     bearer_token=BEARER_TOKEN,
@@ -39,6 +33,13 @@ client = tweepy.Client(
     access_token=ACCESS_TOKEN,
     access_token_secret=ACCESS_TOKEN_SECRET
 )
+print("Tweepy client oluşturuluyor...")
+try:
+    me = client.get_me()
+    print("Twitter hesabı başarıyla bağlandı:", me.data.username)
+except Exception as e:
+    print("Twitter bağlantı hatası:", str(e))
+print("Tweepy client hazır!")
 print("Grok client oluşturuluyor...")
 try:
     # Basit bir test çağrısı
