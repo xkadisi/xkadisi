@@ -5,7 +5,7 @@ from openai import OpenAI
 import time
 import os
 
-# Key'ler
+# Key'ler Render Environment Variables'dan çekiliyor
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN")
 CONSUMER_KEY = os.environ.get("CONSUMER_KEY")
 CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
@@ -36,7 +36,7 @@ Kullanıcı sorusu: {soru}
 
 Dört büyük Sünni mezhebine göre detaylı ama anlaşılır fetva ver.
 Her mezhep için hükmü ve kısa kaynak belirt.
-Açıklama ekleyebilirsin ama abartma.
+Gerekirse kısa açıklama ekle.
 
 Format:
 
@@ -51,18 +51,18 @@ Tüm cevap Türkçe olsun.
 """
     try:
         response = grok_client.chat.completions.create(
-            model="grok-4",
+            model="grok-4",  # Erişimin yoksa "grok-3" yap
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=800,  # Daha uzun cevap için artırdık
+            max_tokens=800,
             temperature=0.3
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return f"Şu anda cevap üretilemedi: {str(e)}"
+        return f"Şu anda fetva üretilemedi: {str(e)}"
 
 def cevap_ver():
     global processed_mentions
-    print("Mention kontrol ediliyor...")
+    print("Mention'lar kontrol ediliyor...")
     try:
         mentions = client.get_users_mentions(
             client.get_me().data.id,
@@ -70,11 +70,18 @@ def cevap_ver():
             tweet_fields=["author_id"]
         )
     except tweepy.TooManyRequests as e:
-        print("Rate limit doldu, 15 dakika bekleniyor...")
-        time.sleep(900)
+        # Dinamik rate limit bekleme
+        reset_time = e.response.headers.get("x-rate-limit-reset")
+        if reset_time:
+            wait = int(reset_time) - int(time.time()) + 10
+            print(f"Rate limit doldu, {wait} saniye bekleniyor...")
+            time.sleep(wait)
+        else:
+            print("Rate limit doldu, 15 dakika bekleniyor...")
+            time.sleep(900)
         return
     except Exception as e:
-        print(f"Mention hatası: {e}")
+        print(f"Mention çekme hatası: {e}")
         time.sleep(60)
         return
 
@@ -86,11 +93,16 @@ def cevap_ver():
         if mention.id in processed_mentions:
             continue
 
-        user = client.get_user(id=mention.author_id)
-        username = user.data.username if user.data else "biri"
+        try:
+            user = client.get_user(id=mention.author_id)
+            username = user.data.username if user.data else "biri"
+        except:
+            username = "biri"
 
         soru = mention.text.lower().replace("@xkadisi", "").strip()
         if not soru:
+            print("Boş mention, atlanıyor.")
+            processed_mentions.add(mention.id)
             continue
 
         print(f"Yeni soru: {soru} (@{username})")
@@ -98,22 +110,25 @@ def cevap_ver():
 
         cevap = f"Merhaba!\n\n{fetva}"
 
-        # Premium sayesinde 25.000 karakter sınırı var, kesme gerekmez
-        # Ama çok uzun olursa thread yapabiliriz (şimdilik tek tweet)
-
         try:
             client.create_tweet(text=cevap, in_reply_to_tweet_id=mention.id)
             print("Uzun cevap gönderildi!\n")
         except tweepy.TooManyRequests as e:
-            print("Rate limit (tweet), bekleniyor...")
-            time.sleep(900)
+            reset_time = e.response.headers.get("x-rate-limit-reset")
+            if reset_time:
+                wait = int(reset_time) - int(time.time()) + 10
+                print(f"Tweet rate limit, {wait} saniye bekleniyor...")
+                time.sleep(wait)
+            else:
+                print("Tweet rate limit, 15 dakika bekleniyor...")
+                time.sleep(900)
         except Exception as e:
-            print(f"Tweet hatası: {e}")
+            print(f"Tweet gönderme hatası: {e}")
 
         processed_mentions.add(mention.id)
-        time.sleep(5)
+        time.sleep(5)  # Tweet'ler arası küçük gecikme
 
-print("XKadisi botu başlatıldı! (Premium uzun cevap versiyonu)")
+print("XKadisi botu başlatıldı! (Rate limit optimize edilmiş versiyon)")
 while True:
     cevap_ver()
-    time.sleep(60)
+    time.sleep(90)  # Rate limit'i korumak için 90 saniye bekleme
