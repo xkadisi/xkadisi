@@ -4,7 +4,19 @@ import tweepy
 from openai import OpenAI
 import time
 import os
-
+print("Debug: Key kontrolü başlıyor...")
+print("BEARER_TOKEN var mı:", "Evet" if os.environ.get("BEARER_TOKEN") else "Hayır")
+print("CONSUMER_KEY var mı:", "Evet" if os.environ.get("CONSUMER_KEY") else "Hayır")
+print("GROK_API_KEY var mı:", "Evet" if os.environ.get("GROK_API_KEY") else "Hayır")
+print("Tüm key'ler yüklendi mi:", all([
+    os.environ.get("BEARER_TOKEN"),
+    os.environ.get("CONSUMER_KEY"),
+    os.environ.get("CONSUMER_SECRET"),
+    os.environ.get("ACCESS_TOKEN"),
+    os.environ.get("ACCESS_TOKEN_SECRET"),
+    os.environ.get("GROK_API_KEY")
+]))
+print("Debug tamamlandı, bot başlıyor...")
 # Key'ler Render Environment Variables'dan çekiliyor
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN")
 CONSUMER_KEY = os.environ.get("CONSUMER_KEY")
