@@ -8,10 +8,11 @@ import logging
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from http.client import RemoteDisconnected
 
+# Logging ayarları - Render logs daha okunaklı olsun
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Key'ler
+# Key'ler Render Environment Variables'dan çekiliyor
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN")
 CONSUMER_KEY = os.environ.get("CONSUMER_KEY")
 CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
@@ -19,12 +20,15 @@ ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
 
-if not all([BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, GROK_API_KEY]):
-    logger.error("Eksik API key!")
+# Key kontrol - eksik varsa bot durur
+required_keys = [BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, GROK_API_KEY]
+if any(key is None for key in required_keys):
+    logger.error("Eksik API key var! Render Environment Variables'ı kontrol edin.")
     exit(1)
 
-logger.info("Tüm key'ler yüklendi.")
+logger.info("Tüm key'ler başarıyla yüklendi.")
 
+# Tweepy client
 client = tweepy.Client(
     bearer_token=BEARER_TOKEN,
     consumer_key=CONSUMER_KEY,
@@ -33,12 +37,13 @@ client = tweepy.Client(
     access_token_secret=ACCESS_TOKEN_SECRET
 )
 
+# Grok client
 grok_client = OpenAI(
     api_key=GROK_API_KEY,
     base_url="https://api.x.ai/v1"
 )
 
-processed_mentions = set()
+processed_mentions = set()  # Restart'ta sıfırlanır (duplicate önler)
 
 def get_fetva(soru):
     prompt = f"""
@@ -70,30 +75,30 @@ Tüm cevap Türkçe olsun.
 
 def cevap_ver():
     logger.info("Mention kontrol ediliyor...")
-    backoff_time = 60  # Başlangıç bekleme
+    backoff_time = 60  # Başlangıç bekleme süresi (exponential backoff için)
     while True:
         try:
             mentions = client.get_users_mentions(
                 client.get_me().data.id,
-                max_results=5,
+                max_results=5,  # Rate limit'i korumak için düşük tut
                 tweet_fields=["author_id"]
             )
             backoff_time = 60  # Başarılı olursa sıfırla
-            break  # Başarılıysa çık
+            break
         except tweepy.TooManyRequests as e:
             reset = int(e.response.headers.get('x-rate-limit-reset', time.time() + 900))
             wait = max(reset - int(time.time()) + 10, 60)
-            logger.warning(f"Rate limit! {wait} saniye bekleniyor...")
+            logger.warning(f"Rate limit doldu! {wait} saniye bekleniyor...")
             time.sleep(wait)
             return
         except (ConnectionResetError, RequestsConnectionError, RemoteDisconnected, ConnectionAbortedError) as e:
             logger.warning(f"Bağlantı hatası: {e}. {backoff_time} saniye beklenip tekrar denenecek...")
             time.sleep(backoff_time)
-            backoff_time = min(backoff_time * 2, 600)  # Exponential backoff, max 10 dk
+            backoff_time = min(backoff_time * 2, 600)  # Exponential backoff, max 10 dakika
         except Exception as e:
             logger.error(f"Beklenmedik mention hatası: {e}")
             time.sleep(120)
-            backoff_time = 60  # Sıfırla
+            backoff_time = 60
 
     if not mentions.data:
         logger.info("Yeni mention yok.")
@@ -131,9 +136,9 @@ def cevap_ver():
             logger.error(f"Tweet hatası: {e}")
 
         processed_mentions.add(mention.id)
-        time.sleep(10)
+        time.sleep(10)  # Cevaplar arası güvenli bekleme
 
 logger.info("XKadisi botu BAŞARIYLA başlatıldı! Mention'lar dinleniyor...")
 while True:
     cevap_ver()
-    time.sleep(120)
+    time.sleep(120)  # Rate limit için 2 dakika polling (daha az istek)
