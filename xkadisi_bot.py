@@ -18,47 +18,42 @@ logger = logging.getLogger(__name__)
 # --- AYARLAR ---
 BOT_ID = 1997244309243060224  
 
-# Keyler
-BEARER_TOKEN = os.environ.get("BEARER_TOKEN")
-CONSUMER_KEY = os.environ.get("CONSUMER_KEY")
-CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
-ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
-ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
-GROK_API_KEY = os.environ.get("GROK_API_KEY")
-
-if not all([BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, GROK_API_KEY]):
-    print("❌ EKSİK KEY HATASI.")
+# Key Kontrolü
+if not os.environ.get("BEARER_TOKEN"):
+    print("❌ Keyler eksik! Lütfen Environment Variables kontrol edin.")
     time.sleep(10)
     exit(1)
 
-# Clientlar
 client = tweepy.Client(
-    bearer_token=BEARER_TOKEN,
-    consumer_key=CONSUMER_KEY,
-    consumer_secret=CONSUMER_SECRET,
-    access_token=ACCESS_TOKEN,
-    access_token_secret=ACCESS_TOKEN_SECRET,
+    bearer_token=os.environ.get("BEARER_TOKEN"),
+    consumer_key=os.environ.get("CONSUMER_KEY"),
+    consumer_secret=os.environ.get("CONSUMER_SECRET"),
+    access_token=os.environ.get("ACCESS_TOKEN"),
+    access_token_secret=os.environ.get("ACCESS_TOKEN_SECRET"),
     wait_on_rate_limit=False 
 )
 
 grok_client = OpenAI(
-    api_key=GROK_API_KEY,
+    api_key=os.environ.get("GROK_API_KEY"),
     base_url="https://api.x.ai/v1"
 )
 
-# Global Değişkenler
 LAST_SEEN_ID = None 
 
-# --- YENİ FONKSİYON: ÜST TWEETİ GETİR ---
+# --- GÜNCELLENEN BAĞLAM FONKSİYONU ---
 def get_parent_tweet_text(mention):
-    """Eğer mention bir yanıtsa, cevap verilen (üstteki) tweetin metnini çeker."""
+    """
+    Eğer mention boşsa, kullanıcının neye cevap verdiğini (reply) 
+    veya neyi alıntıladığını (quote) bulur.
+    """
     if not mention.referenced_tweets:
         return None
     
     for ref in mention.referenced_tweets:
-        if ref.type == 'replied_to':
+        # Hem YANIT (replied_to) hem ALINTI (quoted) desteği eklendi
+        if ref.type in ['replied_to', 'quoted']:
             try:
-                # Üst tweetin metnini çekiyoruz
+                logger.info(f"📄 Bağlam aranıyor ({ref.type})... ID: {ref.id}")
                 parent_tweet = client.get_tweet(
                     ref.id, 
                     tweet_fields=["text", "author_id"]
@@ -66,25 +61,20 @@ def get_parent_tweet_text(mention):
                 if parent_tweet.data:
                     return parent_tweet.data.text
             except Exception as e:
-                logger.error(f"Üst tweet çekilemedi: {e}")
-                return None
+                logger.error(f"Bağlam çekilemedi: {e}")
+                
     return None
 
 def get_fetva(soru, is_context=False):
-    """Grok-3 Fetva Üretici"""
-    
-    # Eğer soru üst tweetten geldiyse promptu ona göre ayarlayalım
     if is_context:
-        prompt_intro = f"Kullanıcı beni şu ifadenin altına etiketledi, lütfen bu duruma/söze dair fıkhi hükmü ver: '{soru}'"
+        prompt_intro = f"Kullanıcı beni şu ifadenin altına etiketledi (veya alıntıladı). Buna dair fıkhi hükmü ver: '{soru}'"
     else:
         prompt_intro = f"Kullanıcı sorusu: {soru}"
 
     prompt = f"""
 {prompt_intro}
 
-Dört büyük Sünni mezhebine göre bu konunun hükmünü detaylı ve anlaşılır bir şekilde açıkla.
-Cevapların kısa olmasın, konuyu doyurucu bir şekilde izah et.
-Her mezhep için hükmü belirttikten sonra, parantez içinde mutlaka dayandığı delili veya fıkıh kitabını yaz.
+Dört büyük Sünni mezhebine göre bu konunun hükmünü detaylı, delilli ve anlaşılır bir şekilde açıkla.
 
 Format:
 Hanefi: [Hüküm] (Kaynak: el-Hidâye)
@@ -109,6 +99,7 @@ Giriş/Bitiş cümlesi yazma.
 def get_replied_ids():
     replied_ids = set()
     try:
+        # Son 50 cevabımızı kontrol et
         my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
         if my_tweets.data:
             for tweet in my_tweets.data:
@@ -121,30 +112,26 @@ def get_replied_ids():
     return replied_ids
 
 def process_mention(mention):
-    # 1. Metni temizle
     text_content = mention.text.lower().replace("@xkadisi", "").strip()
     
     final_soru = ""
     is_context_search = False
 
-    # 2. Eğer metin BOŞ ise veya çok kısaysa (sadece etiket atılmışsa)
+    # Metin boşsa veya çok kısaysa bağlam ara
     if not text_content or len(text_content) < 3:
-        logger.info(f"🤔 Soru boş, üst tweet (Bağlam) kontrol ediliyor... ID: {mention.id}")
+        logger.info(f"🤔 Soru boş, bağlam (Quote/Reply) kontrol ediliyor... ID: {mention.id}")
         parent_text = get_parent_tweet_text(mention)
         
         if parent_text:
-            logger.info(f"💡 BAĞLAM BULUNDU: {parent_text[:50]}...")
+            logger.info(f"💡 BAĞLAM BULUNDU: {parent_text[:40]}...")
             final_soru = parent_text
             is_context_search = True
         else:
-            logger.info("❌ Üst tweet bulunamadı veya okunamadı. Pas geçiliyor.")
+            logger.info("❌ Bağlam bulunamadı, cevap verilemiyor.")
             return
     else:
-        # Kullanıcı bizzat soru sormuş
         final_soru = text_content
 
-    # 3. Fetvayı al
-    logger.info(f"📩 İŞLENİYOR: {final_soru[:30]}...")
     fetva_metni = get_fetva(final_soru, is_context=is_context_search)
     
     if not fetva_metni:
@@ -170,7 +157,7 @@ def main_loop():
     logger.info(f"🔄 Tarama (Ref: {LAST_SEEN_ID})...")
     
     try:
-        # referenced_tweets alanını ekledik ki yanıt olup olmadığını anlayalım
+        # referenced_tweets ÖNEMLİ: Bunu çekmezsek quote/reply olduğunu anlamayız
         mentions = client.get_users_mentions(
             id=BOT_ID,
             since_id=LAST_SEEN_ID,
@@ -197,8 +184,7 @@ def main_loop():
         answered_ids.add(str(mention.id))
 
 # --- ÇALIŞTIR ---
-print("✅ Bot Başlatıldı (Context/Bağlam Modu)")
-print("Artık boş etiketlemelerde üst tweeti okuyacak.")
+print("✅ Bot Başlatıldı (Quote/Alıntı Destekli Mod)")
 
 while True:
     main_loop()
