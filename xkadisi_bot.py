@@ -6,8 +6,7 @@ import os
 import logging
 import sys
 
-# --- LOGLAMA AYARLARI ---
-# Hem sunucu loglarına (Render) hem de ekrana basması için
+# Loglama ayarları
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(message)s',
@@ -17,10 +16,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- AYARLAR ---
-# ID'niz sabitlendi
 BOT_ID = 1997244309243060224  
 
-# Environment Variables (Render'dan okur)
+# Environment Variables
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN")
 CONSUMER_KEY = os.environ.get("CONSUMER_KEY")
 CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
@@ -28,10 +26,8 @@ ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
 
-# Key Kontrolü
 if not all([BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, GROK_API_KEY]):
-    print("❌ EKSİK KEY HATASI: Lütfen Render panelinden Environment Variables kontrol edin.")
-    # Kritik hata ama logu görebilmek için hemen kapatmıyoruz, bekletiyoruz.
+    print("❌ EKSİK KEY HATASI.")
     time.sleep(10)
     exit(1)
 
@@ -50,13 +46,10 @@ grok_client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
-# Render her yeniden başladığında hafıza sıfırlanır.
-# Bu yüzden ilk açılışta son mentionları tekrar cevaplamaması için bir kontrol mekanizması ekleyebiliriz
-# ama şimdilik "görmeme" sorununu çözmek için hafızasız başlatıyoruz.
 LAST_SEEN_ID = None 
 
 def get_fetva(soru):
-    """Grok-3 ile detaylı ve kaynaklı fetva üretir."""
+    """Grok-3 ile detaylı fetva üretir."""
     prompt = f"""
 Kullanıcı sorusu: {soru}
 
@@ -78,7 +71,7 @@ Sadece bu bilgileri ver, giriş veya bitiş cümlesi yazma.
 """
     try:
         response = grok_client.chat.completions.create(
-            model="grok-3", # <-- GÜNCEL MODEL
+            model="grok-3",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2000, 
             temperature=0.4
@@ -88,80 +81,130 @@ Sadece bu bilgileri ver, giriş veya bitiş cümlesi yazma.
         logger.error(f"Grok Hatası: {e}")
         return None
 
-def cevap_ver():
-    global LAST_SEEN_ID
-    logger.info(f"🔍 Mentionlar kontrol ediliyor... (Bot ID: {BOT_ID})")
-    
+def get_replied_ids():
+    """Botun kendi attığı son tweetlere bakıp, kime cevap verdiğini (Referenced Tweets) bulur."""
+    replied_ids = set()
     try:
-        # since_id yoksa (ilk başlangıçsa) en son 10 mention'ı çeker.
-        # since_id varsa, sadece yeni gelenleri çeker.
+        # Botun son 30 tweetini (cevaplarını) çek
+        my_tweets = client.get_users_tweets(
+            id=BOT_ID,
+            max_results=30,
+            tweet_fields=["referenced_tweets"]
+        )
+        if my_tweets.data:
+            for tweet in my_tweets.data:
+                if tweet.referenced_tweets:
+                    for ref in tweet.referenced_tweets:
+                        # Eğer bu tweet bir cevap (replied_to) ise, hedef ID'yi kaydet
+                        if ref.type == 'replied_to':
+                            replied_ids.add(str(ref.id))
+    except Exception as e:
+        logger.error(f"Geçmiş tweet kontrol hatası: {e}")
+    
+    return replied_ids
+
+def process_mention(mention):
+    """Bir mention'ı işleyip cevaplayan yardımcı fonksiyon."""
+    soru = mention.text.lower().replace("@xkadisi", "").strip()
+    logger.info(f"📩 İŞLENİYOR: {mention.text}")
+
+    if not soru:
+        return
+
+    fetva_metni = get_fetva(soru)
+    if not fetva_metni:
+        return
+
+    tam_cevap = (
+        f"Merhaba!\n\n"
+        f"{fetva_metni}\n\n"
+        f"⚠️ Bu genel bilgilendirmedir, mutlak fetva değildir. Lütfen @abdulazizguven'e danışın."
+    )
+
+    try:
+        client.create_tweet(text=tam_cevap, in_reply_to_tweet_id=mention.id)
+        logger.info(f"🚀 CEVAP GÖNDERİLDİ! Tweet ID: {mention.id}")
+        time.sleep(10) # Spam koruması
+    except Exception as e:
+        logger.error(f"Tweet atma hatası: {e}")
+
+def startup_check():
+    """Bot açılırken yapılan 'Eksik Tamamlama' kontrolü."""
+    global LAST_SEEN_ID
+    logger.info("🕵️ BAŞLANGIÇ KONTROLÜ: Cevaplanmamış eski tweetler taranıyor...")
+
+    # 1. Adım: Hangi tweetlere zaten cevap verdik?
+    answered_ids = get_replied_ids()
+    logger.info(f"📋 Kayıtlara göre son {len(answered_ids)} mention'a zaten cevap verilmiş.")
+
+    try:
+        # 2. Adım: Son gelen 10 mention'ı çek
         mentions = client.get_users_mentions(
             id=BOT_ID,
-            since_id=LAST_SEEN_ID, 
             max_results=10, 
-            tweet_fields=["author_id", "created_at", "text"]
+            tweet_fields=["created_at", "text"]
         )
-    except tweepy.TooManyRequests as e:
-        logger.warning("⚠️ Rate limit! 60 saniye bekleniyor...")
-        time.sleep(60)
-        return
+        
+        if not mentions.data:
+            logger.info("📭 Hiç mention yok.")
+            return
+
+        logger.info(f"🔎 Son {len(mentions.data)} mention inceleniyor...")
+        
+        # Eskiden yeniye doğru tara
+        for mention in reversed(mentions.data):
+            LAST_SEEN_ID = mention.id  # En son ID'yi her zaman güncelle (döngü için)
+            
+            # Kendi tweetimizi görmezden gel
+            if str(mention.author_id) == str(BOT_ID):
+                continue
+                
+            # EĞER bu mention ID'si cevapladıklarımız listesinde YOKSA -> CEVAPLA
+            if str(mention.id) not in answered_ids:
+                logger.info(f"💡 EKSİK BULUNDU! Cevaplanmamış tweet: {mention.id}")
+                process_mention(mention)
+            else:
+                logger.info(f"⏭️ Bu mention zaten cevaplanmış, geçiliyor: {mention.id}")
+                
     except Exception as e:
-        logger.error(f"Mention çekme hatası: {e}")
+        logger.error(f"Startup hatası: {e}")
+
+def main_loop():
+    """Normal çalışma döngüsü (Sadece yenileri bekler)"""
+    global LAST_SEEN_ID
+    logger.info(f"🔄 CANLI MOD: Yeni mentionlar bekleniyor... (Ref: {LAST_SEEN_ID})")
+    
+    try:
+        mentions = client.get_users_mentions(
+            id=BOT_ID,
+            since_id=LAST_SEEN_ID, # Sadece son gördüğümüzden sonrakiler
+            max_results=10, 
+            tweet_fields=["created_at", "text", "author_id"]
+        )
+    except Exception as e:
+        logger.error(f"Döngü hatası: {e}")
         time.sleep(60)
         return
 
     if not mentions.data:
-        logger.info("📭 Yeni mention yok. (Kutu boş veya filtrelenmiş)")
         return
 
-    # Mention bulunduysa loga yazalım
-    logger.info(f"✅ {len(mentions.data)} adet mention yakalandı!")
-
+    logger.info(f"🔔 {len(mentions.data)} YENİ mention geldi!")
+    
     for mention in reversed(mentions.data):
         LAST_SEEN_ID = mention.id
+        if str(mention.author_id) == str(BOT_ID): continue
         
-        # Kendi tweetlerimizi cevaplamayalım (sonsuz döngü koruması)
-        if str(mention.author_id) == str(BOT_ID):
-            continue
+        # Canlı modda gelen her şey yenidir, direkt cevapla
+        process_mention(mention)
 
-        soru = mention.text.lower().replace("@xkadisi", "").strip()
-        
-        # Loga soruyu basalım ki gördüğünden emin olalım
-        logger.info(f"📩 İŞLENİYOR: {mention.text} (Gönderen: {mention.author_id})")
+# --- ANA PROGRAM AKIŞI ---
+print("✅ Bot Başlatıldı (Akıllı Telafi Modu)")
 
-        if not soru:
-            logger.info("❌ Boş mention, geçiliyor.")
-            continue
+# 1. Önce eksikleri kapat
+startup_check()
 
-        # Fetva al
-        fetva_metni = get_fetva(soru)
-        
-        if not fetva_metni:
-            logger.error("❌ Fetva üretilemedi, pas geçiliyor.")
-            continue
-
-        # Tek parça uzun cevap oluştur
-        tam_cevap = (
-            f"Merhaba!\n\n"
-            f"{fetva_metni}\n\n"
-            f"⚠️ Bu genel bilgilendirmedir, mutlak fetva değildir. Lütfen @abdulazizguven'e danışın."
-        )
-
-        try:
-            # Long Tweet Gönderimi
-            client.create_tweet(text=tam_cevap, in_reply_to_tweet_id=mention.id)
-            logger.info(f"🚀 CEVAP GÖNDERİLDİ! Tweet ID: {mention.id}")
-            time.sleep(10) # Spam koruması için bekleme
-        except Exception as e:
-            logger.error(f"❌ Tweet atma hatası: {e}")
-            if "duplicate" in str(e).lower():
-                logger.info("💡 Bu tweet daha önce cevaplanmış.")
-
-# --- ANA DÖNGÜ ---
-print("✅ Bot başlatıldı (Render Mode)")
-print("✅ Özellikler: Long Tweet, Grok-3, Hardcoded ID")
-
+# 2. Sonra sonsuz döngüye gir
 while True:
-    cevap_ver()
-    # Basic Tier için güvenli bekleme süresi
+    main_loop()
     time.sleep(60)
