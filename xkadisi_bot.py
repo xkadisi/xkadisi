@@ -6,7 +6,7 @@ import os
 import logging
 import sys
 
-# Loglama ayarları
+# --- LOGLAMA AYARLARI ---
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(message)s',
@@ -15,8 +15,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- AYARLAR ---
-BOT_ID = 1997244309243060224  
+# --- YAPILANDIRMA ---
+BOT_ID = 1997244309243060224  # Botunuzun ID'si
 
 # Environment Variables
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN")
@@ -26,8 +26,9 @@ ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
 
+# Key Kontrolü
 if not all([BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, GROK_API_KEY]):
-    print("❌ EKSİK KEY HATASI.")
+    print("❌ EKSİK KEY HATASI: Environment Variables kontrol edin.")
     time.sleep(10)
     exit(1)
 
@@ -46,6 +47,7 @@ grok_client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
+# Global değişken
 LAST_SEEN_ID = None 
 
 def get_fetva(soru):
@@ -57,17 +59,13 @@ Dört büyük Sünni mezhebine göre bu konunun hükmünü detaylı ve anlaşıl
 Cevapların kısa olmasın, konuyu doyurucu bir şekilde izah et.
 Her mezhep için hükmü belirttikten sonra, parantez içinde mutlaka dayandığı delili veya fıkıh kitabını yaz.
 
-Lütfen tam olarak aşağıdaki formatı kullan:
+Format:
+Hanefi: [Hüküm] (Kaynak: el-Hidâye)
+Şafiî: [Hüküm] (Kaynak: el-Mecmû')
+Mâlikî: [Hüküm] (Kaynak: Muvatta)
+Hanbelî: [Hüküm] (Kaynak: el-Muğnî)
 
-Hanefi: [Hüküm ve detaylı açıklama] (Kaynak: el-Hidâye)
-\n
-Şafiî: [Hüküm ve detaylı açıklama] (Kaynak: el-Mecmû')
-\n
-Mâlikî: [Hüküm ve detaylı açıklama] (Kaynak: Muvatta)
-\n
-Hanbelî: [Hüküm ve detaylı açıklama] (Kaynak: el-Muğnî)
-
-Sadece bu bilgileri ver, giriş veya bitiş cümlesi yazma.
+Giriş veya bitiş cümlesi yazma, sadece yukarıdaki formatı ver.
 """
     try:
         response = grok_client.chat.completions.create(
@@ -82,31 +80,30 @@ Sadece bu bilgileri ver, giriş veya bitiş cümlesi yazma.
         return None
 
 def get_replied_ids():
-    """Botun kendi attığı son tweetlere bakıp, kime cevap verdiğini (Referenced Tweets) bulur."""
+    """Daha önce cevap verilmiş tweetleri hafızaya alır (Spam önleme)."""
     replied_ids = set()
     try:
-        # Botun son 30 tweetini (cevaplarını) çek
+        # Botun kendi timeline'ına bakarak kime cevap verdiğini bulur
+        # Bu yöntem, takipleşme olmasa bile botun cevaplarını görür.
         my_tweets = client.get_users_tweets(
             id=BOT_ID,
-            max_results=30,
+            max_results=50, # Son 50 cevabı kontrol et
             tweet_fields=["referenced_tweets"]
         )
         if my_tweets.data:
             for tweet in my_tweets.data:
                 if tweet.referenced_tweets:
                     for ref in tweet.referenced_tweets:
-                        # Eğer bu tweet bir cevap (replied_to) ise, hedef ID'yi kaydet
                         if ref.type == 'replied_to':
                             replied_ids.add(str(ref.id))
     except Exception as e:
-        logger.error(f"Geçmiş tweet kontrol hatası: {e}")
-    
+        logger.error(f"Geçmiş kontrol hatası: {e}")
     return replied_ids
 
 def process_mention(mention):
-    """Bir mention'ı işleyip cevaplayan yardımcı fonksiyon."""
+    """Mention'ı işler ve cevaplar (Herkese Açık)."""
     soru = mention.text.lower().replace("@xkadisi", "").strip()
-    logger.info(f"📩 İŞLENİYOR: {mention.text}")
+    logger.info(f"📩 İŞLENİYOR: {mention.text} (Yazar ID: {mention.author_id})")
 
     if not soru:
         return
@@ -115,6 +112,7 @@ def process_mention(mention):
     if not fetva_metni:
         return
 
+    # Cevap Metni
     tam_cevap = (
         f"Merhaba!\n\n"
         f"{fetva_metni}\n\n"
@@ -122,89 +120,62 @@ def process_mention(mention):
     )
 
     try:
+        # in_reply_to_tweet_id parametresi, mention atan kişiyi otomatik etiketler.
+        # Takipleşme olup olmaması önemli değildir.
         client.create_tweet(text=tam_cevap, in_reply_to_tweet_id=mention.id)
         logger.info(f"🚀 CEVAP GÖNDERİLDİ! Tweet ID: {mention.id}")
-        time.sleep(10) # Spam koruması
+        time.sleep(10) 
     except Exception as e:
         logger.error(f"Tweet atma hatası: {e}")
 
-def startup_check():
-    """Bot açılırken yapılan 'Eksik Tamamlama' kontrolü."""
-    global LAST_SEEN_ID
-    logger.info("🕵️ BAŞLANGIÇ KONTROLÜ: Cevaplanmamış eski tweetler taranıyor...")
-
-    # 1. Adım: Hangi tweetlere zaten cevap verdik?
-    answered_ids = get_replied_ids()
-    logger.info(f"📋 Kayıtlara göre son {len(answered_ids)} mention'a zaten cevap verilmiş.")
-
-    try:
-        # 2. Adım: Son gelen 10 mention'ı çek
-        mentions = client.get_users_mentions(
-            id=BOT_ID,
-            max_results=10, 
-            tweet_fields=["created_at", "text"]
-        )
-        
-        if not mentions.data:
-            logger.info("📭 Hiç mention yok.")
-            return
-
-        logger.info(f"🔎 Son {len(mentions.data)} mention inceleniyor...")
-        
-        # Eskiden yeniye doğru tara
-        for mention in reversed(mentions.data):
-            LAST_SEEN_ID = mention.id  # En son ID'yi her zaman güncelle (döngü için)
-            
-            # Kendi tweetimizi görmezden gel
-            if str(mention.author_id) == str(BOT_ID):
-                continue
-                
-            # EĞER bu mention ID'si cevapladıklarımız listesinde YOKSA -> CEVAPLA
-            if str(mention.id) not in answered_ids:
-                logger.info(f"💡 EKSİK BULUNDU! Cevaplanmamış tweet: {mention.id}")
-                process_mention(mention)
-            else:
-                logger.info(f"⏭️ Bu mention zaten cevaplanmış, geçiliyor: {mention.id}")
-                
-    except Exception as e:
-        logger.error(f"Startup hatası: {e}")
-
 def main_loop():
-    """Normal çalışma döngüsü (Sadece yenileri bekler)"""
+    """Ana döngü: Hem eksikleri tamamlar hem yenileri dinler."""
     global LAST_SEEN_ID
-    logger.info(f"🔄 CANLI MOD: Yeni mentionlar bekleniyor... (Ref: {LAST_SEEN_ID})")
+    
+    # 1. Adım: Zaten cevapladıklarımızı öğren
+    answered_ids = get_replied_ids()
+    
+    logger.info(f"🔄 Mentionlar taranıyor... (Ref ID: {LAST_SEEN_ID})")
     
     try:
+        # Takip durumu fark etmeksizin mentionları çeker
         mentions = client.get_users_mentions(
             id=BOT_ID,
-            since_id=LAST_SEEN_ID, # Sadece son gördüğümüzden sonrakiler
+            since_id=LAST_SEEN_ID,
             max_results=10, 
             tweet_fields=["created_at", "text", "author_id"]
         )
     except Exception as e:
-        logger.error(f"Döngü hatası: {e}")
+        logger.error(f"API Hatası: {e}")
         time.sleep(60)
         return
 
     if not mentions.data:
+        # Mention yoksa bekle
         return
 
-    logger.info(f"🔔 {len(mentions.data)} YENİ mention geldi!")
+    logger.info(f"🔔 {len(mentions.data)} mention bulundu.")
     
+    # Eskiden yeniye doğru işle
     for mention in reversed(mentions.data):
         LAST_SEEN_ID = mention.id
-        if str(mention.author_id) == str(BOT_ID): continue
         
-        # Canlı modda gelen her şey yenidir, direkt cevapla
-        process_mention(mention)
+        # Kendimize cevap vermeyelim
+        if str(mention.author_id) == str(BOT_ID):
+            continue
+            
+        # Eğer bu tweet'e daha önce cevap VERMEMİŞSEK -> Cevapla
+        if str(mention.id) not in answered_ids:
+            process_mention(mention)
+            # Cevapladığımız listesine ekleyelim ki döngü içinde tekrar cevaplamasın
+            answered_ids.add(str(mention.id))
+        else:
+            logger.info(f"⏭️ Bu tweete zaten cevap verilmiş: {mention.id}")
 
-# --- ANA PROGRAM AKIŞI ---
-print("✅ Bot Başlatıldı (Akıllı Telafi Modu)")
+# --- BAŞLATMA ---
+print("✅ Bot Başlatıldı (Herkese Açık Mod)")
+print("ℹ️ Not: X Ayarlarından 'Bildirim Filtreleri'nin kapalı olduğundan emin olun.")
 
-# 1. Önce eksikleri kapat
-startup_check()
-
-# 2. Sonra sonsuz döngüye gir
 while True:
     main_loop()
     time.sleep(60)
