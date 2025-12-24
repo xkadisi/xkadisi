@@ -24,9 +24,7 @@ if not os.environ.get("BEARER_TOKEN"):
     time.sleep(10)
     exit(1)
 
-# --- İYİLEŞTİRME BURADA ---
-# wait_on_rate_limit=True yaptık. 
-# Artık 429 hatası alınca kod çökmez, Twitter ne kadar derse o kadar bekler.
+# Rate Limit Koruması Aktif
 client = tweepy.Client(
     bearer_token=os.environ.get("BEARER_TOKEN"),
     consumer_key=os.environ.get("CONSUMER_KEY"),
@@ -42,6 +40,7 @@ grok_client = OpenAI(
 )
 
 LAST_SEEN_ID = None 
+ANSWERED_IDS = set() # Hafızayı global yapıyoruz
 
 def get_parent_tweet_text(mention):
     """Reply veya Quote içeriğini bulur."""
@@ -92,19 +91,21 @@ Giriş/Bitiş cümlesi yazma.
         logger.error(f"Grok Hatası: {e}")
         return None
 
-def get_replied_ids():
-    replied_ids = set()
+def get_replied_ids_once():
+    """Sadece başlangıçta çalışır: Geçmiş cevapları hafızaya alır."""
+    ids = set()
     try:
+        logger.info("📂 Geçmiş tweetler taranıyor (Başlangıç İşlemi)...")
         my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
         if my_tweets.data:
             for tweet in my_tweets.data:
                 if tweet.referenced_tweets:
                     for ref in tweet.referenced_tweets:
                         if ref.type == 'replied_to':
-                            replied_ids.add(str(ref.id))
-    except Exception:
-        pass
-    return replied_ids
+                            ids.add(str(ref.id))
+    except Exception as e:
+        logger.error(f"Geçmiş tarama hatası: {e}")
+    return ids
 
 def process_mention(mention):
     text_content = mention.text.lower().replace("@xkadisi", "").strip()
@@ -137,21 +138,19 @@ def process_mention(mention):
     try:
         client.create_tweet(text=tam_cevap, in_reply_to_tweet_id=mention.id)
         logger.info(f"🚀 CEVAP GÖNDERİLDİ! Tweet ID: {mention.id}")
-        # Spam koruması için kısa bekleme
         time.sleep(5) 
+        return True # Başarılı olduğunu bildir
     except Exception as e:
         logger.error(f"Tweet atma hatası: {e}")
+        return False
 
 def main_loop():
     global LAST_SEEN_ID
-    
-    # 1. Başlangıçta cevapladıklarımızı alalım
-    answered_ids = get_replied_ids()
+    # ANSWERED_IDS artık global, her döngüde yeniden çekmiyoruz.
     
     logger.info(f"🔄 Tarama (Ref: {LAST_SEEN_ID})...")
     
     try:
-        # Rate limit durumunda Tweepy burada otomatik bekleyecek (log basmadan bekleyebilir)
         mentions = client.get_users_mentions(
             id=BOT_ID,
             since_id=LAST_SEEN_ID,
@@ -160,7 +159,8 @@ def main_loop():
         )
     except Exception as e:
         logger.error(f"Beklenmedik Hata: {e}")
-        time.sleep(60)
+        # Hata alınca biraz uzun bekle
+        time.sleep(120)
         return
 
     if not mentions.data:
@@ -172,17 +172,22 @@ def main_loop():
         LAST_SEEN_ID = mention.id
         
         if str(mention.author_id) == str(BOT_ID): continue
-        if str(mention.id) in answered_ids: continue
+        if str(mention.id) in ANSWERED_IDS: continue
         
-        process_mention(mention)
-        # İşlenen mention'ı listeye ekle ki aynı döngüde tekrar denemesin
-        answered_ids.add(str(mention.id))
+        basarili = process_mention(mention)
+        
+        if basarili:
+            # Cevap verdiysek hafızaya ekle, bir daha sorma
+            ANSWERED_IDS.add(str(mention.id))
 
 # --- ÇALIŞTIR ---
-print("✅ Bot Başlatıldı (Otomatik Rate Limit Korumalı)")
+print("✅ Bot Başlatıldı (Optimizasyonlu Mod)")
+
+# 1. Başlangıçta SADECE BİR KEZ geçmişi öğren
+ANSWERED_IDS = get_replied_ids_once()
+logger.info(f"🧠 Hafızaya alınan cevap sayısı: {len(ANSWERED_IDS)}")
 
 while True:
     main_loop()
-    # Basic Tier limiti (180 istek / 15 dk) = Ortalama 5 saniyede 1 istek.
-    # Güvenlik için 60 saniye bekliyoruz.
-    time.sleep(60)
+    # 60 saniye bazen sınıra takılabilir, 75 saniye daha güvenlidir.
+    time.sleep(75)
