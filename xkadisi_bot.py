@@ -6,20 +6,19 @@ import os
 import logging
 import sys
 
-# Loglama ayarları (Hem dosyaya hem konsola basması için)
+# Loglama ayarları
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
-# --- DEBUG BAŞLANGIÇ ---
-print("--- BAŞLATILIYOR: Değişken Kontrolü ---")
-# Değişkenleri al
+# --- AYARLAR ---
+BOT_ID = 1997244309243060224  # Sizin botunuzun ID'si
+
+# Environment Variables
 BEARER_TOKEN = os.environ.get("BEARER_TOKEN")
 CONSUMER_KEY = os.environ.get("CONSUMER_KEY")
 CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
@@ -27,78 +26,60 @@ ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.environ.get("ACCESS_TOKEN_SECRET")
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
 
-# Hangi anahtar eksikse ekrana yazdır (Güvenlik için değerleri gizliyoruz)
-missing_keys = []
-if not BEARER_TOKEN: missing_keys.append("BEARER_TOKEN")
-if not CONSUMER_KEY: missing_keys.append("CONSUMER_KEY")
-if not CONSUMER_SECRET: missing_keys.append("CONSUMER_SECRET")
-if not ACCESS_TOKEN: missing_keys.append("ACCESS_TOKEN")
-if not ACCESS_TOKEN_SECRET: missing_keys.append("ACCESS_TOKEN_SECRET")
-if not GROK_API_KEY: missing_keys.append("GROK_API_KEY")
-
-if missing_keys:
-    print("❌ KRİTİK HATA: Aşağıdaki Environment Variable'lar EKSİK veya OKUNAMIYOR:")
-    for key in missing_keys:
-        print(f"- {key}")
-    print("Lütfen paneldeki değerlerin başında/sonunda boşluk olmadığından emin olun.")
-    # Programın çökme sebebini görmek için çıkış yapıyoruz
-    exit(1)
-else:
-    print("✅ Tüm anahtarlar başarıyla okundu.")
-
-# --- YAPILANDIRMA ---
-BOT_ID = 1997244309243060224  # Sizin botunuzun ID'si
-
-# X Client Başlatma
-try:
-    client = tweepy.Client(
-        bearer_token=BEARER_TOKEN,
-        consumer_key=CONSUMER_KEY,
-        consumer_secret=CONSUMER_SECRET,
-        access_token=ACCESS_TOKEN,
-        access_token_secret=ACCESS_TOKEN_SECRET,
-        wait_on_rate_limit=False 
-    )
-    # Grok Client Başlatma
-    grok_client = OpenAI(
-        api_key=GROK_API_KEY,
-        base_url="https://api.x.ai/v1"
-    )
-except Exception as e:
-    print(f"❌ Client başlatma hatası: {e}")
+# Key Kontrolü
+if not all([BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, GROK_API_KEY]):
+    print("❌ EKSİK KEY HATASI: Lütfen Environment Variables kontrol edin.")
     exit(1)
 
-# Global değişkenler
+# Client Başlatma
+client = tweepy.Client(
+    bearer_token=BEARER_TOKEN,
+    consumer_key=CONSUMER_KEY,
+    consumer_secret=CONSUMER_SECRET,
+    access_token=ACCESS_TOKEN,
+    access_token_secret=ACCESS_TOKEN_SECRET,
+    wait_on_rate_limit=False 
+)
+
+grok_client = OpenAI(
+    api_key=GROK_API_KEY,
+    base_url="https://api.x.ai/v1"
+)
+
 LAST_SEEN_ID = None 
 
 def get_fetva(soru):
-    """Grok üzerinden fetva üretir."""
+    """Grok üzerinden detaylı ve delilli fetva üretir."""
     prompt = f"""
 Kullanıcı sorusu: {soru}
 
-Dört büyük Sünni mezhebine göre detaylı fetva ver.
-Her mezhep için hüküm ve kısa kaynak belirt.
+Dört büyük Sünni mezhebine göre bu konunun hükmünü detaylı ve anlaşılır bir şekilde açıkla.
+Cevapların kısa olmasın, konuyu doyurucu bir şekilde izah et.
+Her mezhep için hükmü belirttikten sonra, parantez içinde mutlaka dayandığı delili veya fıkıh kitabını yaz.
 
-Format:
-Hanefi: [hüküm] (el-Hidâye)
-Şafiî: [hüküm] (el-Mecmû')
-Mâlikî: [hüküm] (Muvatta)
-Hanbelî: [hüküm] (el-Muğnî)
+Lütfen tam olarak aşağıdaki formatı kullan:
 
-Bu genel bilgilendirmedir, mutlak fetva değildir. Lütfen ehline danışın.
-Tüm cevap Türkçe olsun ve 280 karaktere sığmaya çalışsın.
+Hanefi: [Hüküm ve detaylı açıklama] (Kaynak: el-Hidâye)
+\n
+Şafiî: [Hüküm ve detaylı açıklama] (Kaynak: el-Mecmû')
+\n
+Mâlikî: [Hüküm ve detaylı açıklama] (Kaynak: Muvatta)
+\n
+Hanbelî: [Hüküm ve detaylı açıklama] (Kaynak: el-Muğnî)
+
+Sadece bu bilgileri ver, giriş veya bitiş cümlesi yazma.
 """
     try:
         response = grok_client.chat.completions.create(
-            model="grok-3",  # <-- GÜNCELLENDİ: grok-beta yerine grok-3
+            model="grok-3", 
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=800,
-            temperature=0.3
+            max_tokens=2000, # Uzun cevap için token limitini artırdık
+            temperature=0.4
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         logger.error(f"Grok Hatası: {e}")
-        return f"Şu an sistemsel bir yoğunluk var. (Kod: {int(time.time())})"
+        return None
 
 def cevap_ver():
     global LAST_SEEN_ID
@@ -112,10 +93,8 @@ def cevap_ver():
             tweet_fields=["author_id", "created_at"]
         )
     except tweepy.TooManyRequests as e:
-        reset_time = int(e.response.headers.get('x-rate-limit-reset', time.time() + 900))
-        wait_seconds = max(reset_time - int(time.time()) + 10, 60)
-        logger.warning(f"⚠️ RATE LIMIT! {wait_seconds} saniye bekleniyor...")
-        time.sleep(wait_seconds)
+        logger.warning("⚠️ Rate limit! Bekleniyor...")
+        time.sleep(60)
         return
     except Exception as e:
         logger.error(f"Mention hatası: {e}")
@@ -134,18 +113,32 @@ def cevap_ver():
             continue
 
         logger.info(f"Soru işleniyor: {soru}")
+        
+        # 1. Fetvayı al
         fetva_metni = get_fetva(soru)
-        cevap = f"Merhaba!\n\n{fetva_metni}"[:280]
+        
+        if not fetva_metni:
+            continue
+
+        # 2. Metni birleştir (Giriş + Fetva + Yasal Uyarı)
+        # Karakter sınırı olmadığı için hepsini tek string yapıyoruz.
+        tam_cevap = (
+            f"Merhaba!\n\n"
+            f"{fetva_metni}\n\n"
+            f"⚠️ Bu genel bilgilendirmedir, mutlak fetva değildir. Lütfen @abdulazizguven'e danışın."
+        )
 
         try:
-            client.create_tweet(text=cevap, in_reply_to_tweet_id=mention.id)
-            logger.info(f"✅ Cevap gönderildi! ID: {mention.id}")
+            # Tek seferde gönderiyoruz (Premium hesaplar için)
+            client.create_tweet(text=tam_cevap, in_reply_to_tweet_id=mention.id)
+            logger.info(f"✅ Uzun cevap gönderildi! ID: {mention.id}")
             time.sleep(5) 
         except Exception as e:
             logger.error(f"Tweet atma hatası: {e}")
+            # Eğer hesap Premium değilse burada 'text is too long' hatası verir.
 
 # --- ANA DÖNGÜ ---
-print("✅ Bot başarıyla başlatıldı, döngüye giriliyor...")
+print("✅ Bot (Long Tweet Modu) başlatıldı...")
 while True:
     cevap_ver()
     time.sleep(60)
