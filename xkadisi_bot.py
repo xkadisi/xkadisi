@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 # --- AYARLAR ---
 BOT_ID = 1997244309243060224  
 
-# Key Kontrolü
+# Environment Variables Kontrolü
 if not os.environ.get("BEARER_TOKEN"):
-    print("❌ Keyler eksik! Lütfen Environment Variables kontrol edin.")
+    print("❌ HATA: API Keyler bulunamadı!")
     time.sleep(10)
     exit(1)
 
-# Rate Limit Koruması Aktif
+# Rate Limit Koruması Açık
 client = tweepy.Client(
     bearer_token=os.environ.get("BEARER_TOKEN"),
     consumer_key=os.environ.get("CONSUMER_KEY"),
@@ -39,15 +39,18 @@ grok_client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
-LAST_SEEN_ID = None 
-ANSWERED_IDS = set() # Hafızayı global yapıyoruz
+# Global Hafıza Seti
+ANSWERED_IDS = set()
 
-def get_parent_tweet_text(mention):
-    """Reply veya Quote içeriğini bulur."""
+def get_context(mention):
+    """
+    Tweetin bağlamını (Reply ise üst tweeti, Quote ise alıntılananı) çeker.
+    """
     if not mention.referenced_tweets:
         return None
     
     for ref in mention.referenced_tweets:
+        # Quote (Alıntı) veya Replied_to (Yanıt) fark etmeksizin içeriği al
         if ref.type in ['replied_to', 'quoted']:
             try:
                 parent_tweet = client.get_tweet(
@@ -60,16 +63,17 @@ def get_parent_tweet_text(mention):
                 pass     
     return None
 
-def get_fetva(soru, is_context=False):
-    if is_context:
-        prompt_intro = f"Kullanıcı beni şu ifadenin altına etiketledi (veya alıntıladı). Buna dair fıkhi hükmü ver: '{soru}'"
-    else:
-        prompt_intro = f"Kullanıcı sorusu: {soru}"
+def get_fetva(soru, context_text=None):
+    """Grok-3 Fetva Üretici"""
+    
+    prompt_intro = f"Kullanıcı sorusu: {soru}"
+    if context_text:
+        prompt_intro += f"\n\n(BAĞLAM/KONU: Kullanıcı şu metni alıntılayarak veya altına yazarak sordu: '{context_text}')"
 
     prompt = f"""
 {prompt_intro}
 
-Dört büyük Sünni mezhebine göre bu konunun hükmünü detaylı, delilli ve anlaşılır bir şekilde açıkla.
+Lütfen Dört Büyük Sünni Mezhebine (Hanefi, Şafiî, Mâlikî, Hanbelî) göre bu konunun fıkhi hükmünü detaylı ve delilli açıkla.
 
 Format:
 Hanefi: [Hüküm] (Kaynak: el-Hidâye)
@@ -77,7 +81,7 @@ Hanefi: [Hüküm] (Kaynak: el-Hidâye)
 Mâlikî: [Hüküm] (Kaynak: Muvatta)
 Hanbelî: [Hüküm] (Kaynak: el-Muğnî)
 
-Giriş/Bitiş cümlesi yazma.
+Giriş ve sonuç cümlesi yazma. Sadece formatı ver.
 """
     try:
         response = grok_client.chat.completions.create(
@@ -91,12 +95,17 @@ Giriş/Bitiş cümlesi yazma.
         logger.error(f"Grok Hatası: {e}")
         return None
 
-def get_replied_ids_once():
-    """Sadece başlangıçta çalışır: Geçmiş cevapları hafızaya alır."""
+def load_history():
+    """Bot açıldığında 'Ben daha önce kime cevap verdim?' diye hafızayı doldurur."""
     ids = set()
+    logger.info("📂 Geçmiş cevaplar taranıyor (Hafıza Tazeleme)...")
     try:
-        logger.info("📂 Geçmiş tweetler taranıyor (Başlangıç İşlemi)...")
-        my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
+        # Botun attığı son 60 tweeti (cevapları) kontrol et
+        my_tweets = client.get_users_tweets(
+            id=BOT_ID, 
+            max_results=60, 
+            tweet_fields=["referenced_tweets"]
+        )
         if my_tweets.data:
             for tweet in my_tweets.data:
                 if tweet.referenced_tweets:
@@ -108,27 +117,34 @@ def get_replied_ids_once():
     return ids
 
 def process_mention(mention):
-    text_content = mention.text.lower().replace("@xkadisi", "").strip()
-    final_soru = ""
-    is_context_search = False
-
-    if not text_content or len(text_content) < 3:
-        logger.info(f"🤔 Soru boş, bağlam aranıyor... ID: {mention.id}")
-        parent_text = get_parent_tweet_text(mention)
-        if parent_text:
-            final_soru = parent_text
-            is_context_search = True
-        else:
-            return
-    else:
-        final_soru = text_content
-
-    logger.info(f"📩 İŞLENİYOR: {final_soru[:30]}...")
-    fetva_metni = get_fetva(final_soru, is_context=is_context_search)
+    """Tek bir mention'ı işler ve cevaplar."""
+    
+    # 1. Metin Temizliği
+    raw_text = mention.text.lower().replace("@xkadisi", "").strip()
+    context_text = None
+    
+    # 2. Bağlam Kontrolü
+    # Eğer soru çok kısaysa (örn: "bunun hükmü ne") veya boşsa, MUTLAKA üst tweeti çek.
+    if len(raw_text) < 5 or not raw_text:
+        logger.info(f"🔍 Bağlam aranıyor... ID: {mention.id}")
+        context_text = get_context(mention)
+        
+        if not context_text and not raw_text:
+            logger.info("❌ Ne soru var ne bağlam. Cevap verilemiyor.")
+            return False # Başarısız
+    
+    # 3. Fetva İste
+    # Soruyu belirle (Soru varsa soru, yoksa bağlam)
+    final_query = raw_text if raw_text else "Bu durumun hükmü nedir?"
+    
+    logger.info(f"📩 İŞLENİYOR: {final_query[:30]}... (Tweet ID: {mention.id})")
+    
+    fetva_metni = get_fetva(final_query, context_text)
     
     if not fetva_metni:
-        return
+        return False
 
+    # 4. Cevabı Gönder
     tam_cevap = (
         f"Merhaba!\n\n"
         f"{fetva_metni}\n\n"
@@ -137,57 +153,73 @@ def process_mention(mention):
 
     try:
         client.create_tweet(text=tam_cevap, in_reply_to_tweet_id=mention.id)
-        logger.info(f"🚀 CEVAP GÖNDERİLDİ! Tweet ID: {mention.id}")
-        time.sleep(5) 
-        return True # Başarılı olduğunu bildir
+        logger.info(f"🚀 CEVAPLANDI! Tweet ID: {mention.id}")
+        time.sleep(5) # Spam koruması
+        return True
     except Exception as e:
         logger.error(f"Tweet atma hatası: {e}")
         return False
 
 def main_loop():
-    global LAST_SEEN_ID
-    # ANSWERED_IDS artık global, her döngüde yeniden çekmiyoruz.
+    """
+    ÖRTÜŞMELİ TARAMA DÖNGÜSÜ
+    since_id kullanmıyoruz. Her seferinde son 15 mention'ı çekip,
+    'Ben buna cevap vermiş miydim?' diye ANSWERED_IDS kümesine bakıyoruz.
+    """
+    global ANSWERED_IDS
     
-    logger.info(f"🔄 Tarama (Ref: {LAST_SEEN_ID})...")
+    logger.info("🔄 Tarama Başlıyor (Son 15 Mention)...")
     
     try:
+        # since_id YOK. Daima en güncel 15 taneyi al.
         mentions = client.get_users_mentions(
             id=BOT_ID,
-            since_id=LAST_SEEN_ID,
-            max_results=10, 
+            max_results=15, 
             tweet_fields=["created_at", "text", "author_id", "referenced_tweets"] 
         )
     except Exception as e:
-        logger.error(f"Beklenmedik Hata: {e}")
-        # Hata alınca biraz uzun bekle
-        time.sleep(120)
+        logger.error(f"API Hatası: {e}")
+        time.sleep(60)
         return
 
     if not mentions.data:
+        logger.info("📭 Hiç mention yok.")
         return
-
-    logger.info(f"🔔 {len(mentions.data)} yeni bildirim.")
     
+    # Tweetleri eskiden yeniye işle
+    new_count = 0
     for mention in reversed(mentions.data):
-        LAST_SEEN_ID = mention.id
         
-        if str(mention.author_id) == str(BOT_ID): continue
-        if str(mention.id) in ANSWERED_IDS: continue
+        # 1. Kendi tweetimiz mi?
+        if str(mention.author_id) == str(BOT_ID):
+            continue
+            
+        # 2. Zaten cevapladık mı? (Hafıza Kontrolü)
+        if str(mention.id) in ANSWERED_IDS:
+            continue
+            
+        # 3. Yeni Mention Bulundu! İşle.
+        logger.info(f"✨ YENİ YAKALANDI: {mention.id}")
+        basari = process_mention(mention)
         
-        basarili = process_mention(mention)
-        
-        if basarili:
-            # Cevap verdiysek hafızaya ekle, bir daha sorma
-            ANSWERED_IDS.add(str(mention.id))
+        # İşlem denendiyse (başarılı veya başarısız) hafızaya al ki
+        # döngüde sürekli deneyip API'yi yormasın veya spam yapmasın.
+        ANSWERED_IDS.add(str(mention.id))
+        new_count += 1
 
-# --- ÇALIŞTIR ---
-print("✅ Bot Başlatıldı (Optimizasyonlu Mod)")
+    if new_count == 0:
+        logger.info("💤 Yeni işlem yapılacak tweet bulunamadı.")
+    else:
+        logger.info(f"✅ Bu turda {new_count} yeni tweet işlendi.")
 
-# 1. Başlangıçta SADECE BİR KEZ geçmişi öğren
-ANSWERED_IDS = get_replied_ids_once()
-logger.info(f"🧠 Hafızaya alınan cevap sayısı: {len(ANSWERED_IDS)}")
+# --- BAŞLATMA ---
+print("✅ Bot Başlatıldı (No-Miss / Örtüşmeli Mod)")
+
+# 1. Başlangıçta hafızayı yükle
+ANSWERED_IDS = load_history()
+logger.info(f"🧠 Hafızada {len(ANSWERED_IDS)} adet cevaplanmış tweet var.")
 
 while True:
     main_loop()
-    # 60 saniye bazen sınıra takılabilir, 75 saniye daha güvenlidir.
-    time.sleep(75)
+    # 90 saniye bekleme süresi (API kotası ve güvenli overlap için ideal)
+    time.sleep(90)
