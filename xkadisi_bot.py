@@ -253,4 +253,4 @@ except: pass
 while True:
     tweet_loop()
     check_dms()
-    time.sleep(70)
+    time.sleep(100)
