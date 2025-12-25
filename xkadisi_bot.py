@@ -129,7 +129,6 @@ def check_dms():
         for event in reversed(events.data):
             if str(event.id) in ANSWERED_DM_IDS: continue
 
-            # Zaman kontrolü
             created_timestamp = int(event.created_at) / 1000 
             msg_time = datetime.fromtimestamp(created_timestamp, timezone.utc)
             now = datetime.now(timezone.utc)
@@ -173,11 +172,8 @@ def check_dms():
                     ANSWERED_DM_IDS.add(str(event.id))
 
     except Exception as e:
-        # --- KRİTİK DÜZELTME BURADA ---
-        # Eğer Bağlantı hatası veya Rate Limit gelirse, 15 dakika uyumak yerine
-        # sadece log bas ve bu turu pas geç.
         if "Connection" in str(e) or "reset by peer" in str(e):
-             logger.warning("⚠️ Twitter DM Sunucusu meşgul (Connection Reset). Bu tur pas geçildi.")
+             logger.warning("⚠️ Twitter DM Sunucusu meşgul. Bu tur pas geçildi.")
         else:
              logger.error(f"DM Genel Hata: {e}")
 
@@ -189,7 +185,7 @@ def tweet_loop():
     
     try:
         tweets = client.search_recent_tweets(
-            query=query, max_results=50, # 100 yerine 50 yaptık, daha hafif olsun
+            query=query, max_results=50, 
             expansions=["referenced_tweets.id", "author_id"],
             tweet_fields=["text", "referenced_tweets", "created_at"]
         )
@@ -227,7 +223,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GÜVENLİ MOD - 150sn)")
+print("✅ Bot Başlatıldı (Akıllı Dağıtık Mod - DM Seyreltilmiş)")
 BOT_USERNAME = get_bot_username()
 
 try:
@@ -239,14 +235,24 @@ try:
                 ANSWERED_TWEET_IDS.add(str(t.referenced_tweets[0].id))
 except: pass
 
+# --- DÖNGÜ SAYACI ---
+loop_counter = 0
+
 while True:
+    # 1. Her zaman Tweet kontrol et
     tweet_loop()
-    # DM Kontrolü bazen hata verirse programı durdurmasın
-    try:
-        check_dms()
-    except Exception as e:
-        logger.error(f"Döngü hatası: {e}")
     
-    # GÜVENLİ BEKLEME SÜRESİ: 150 SANİYE (2.5 Dakika)
-    # Bu süre API'nin nefes almasını sağlar.
+    # 2. DM Kontrolünü sadece her 4 turda bir yap (4 x 150sn = 10 Dakikada bir)
+    # Bu sayede DM limiti aşılmaz.
+    if loop_counter % 4 == 0:
+        try:
+            check_dms()
+        except Exception as e:
+            logger.error(f"Döngü hatası: {e}")
+    else:
+        logger.info("⏳ DM kontrolü bu turda atlandı (Limit koruması).")
+
+    loop_counter += 1
+    
+    # Bekleme Süresi (Sabit)
     time.sleep(150)
