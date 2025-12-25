@@ -16,10 +16,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- KEYLER ---
+# --- KEY KONTROL ---
 required_keys = ["BEARER_TOKEN", "CONSUMER_KEY", "CONSUMER_SECRET", "ACCESS_TOKEN", "ACCESS_TOKEN_SECRET", "GROK_API_KEY"]
 if not all(os.environ.get(k) for k in required_keys):
-    logger.error("❌ HATA: Keyler eksik!")
+    logger.error("❌ HATA: Keyler eksik! Render ayarlarını kontrol edin.")
     time.sleep(10)
     exit(1)
 
@@ -44,10 +44,7 @@ grok_client = OpenAI(
 # --- HAFIZA SİSTEMLERİ ---
 ANSWERED_TWEET_IDS = set()
 ANSWERED_DM_IDS = set() 
-
-# KİM KAÇ SORU SORDU? (Freemium Hafızası)
 USER_QUESTION_COUNTS = {} 
-
 KNOWN_FOLLOWERS = set()
 KNOWN_NON_FOLLOWERS = set()
 BOT_USERNAME = None
@@ -101,43 +98,38 @@ def get_context(tweet):
             except: pass
     return None
 
-# --- TAKİPÇİ KONTROLÜ (Kota Dostu) ---
 def is_user_following_safe(user_id):
     user_str = str(user_id)
     if user_str in KNOWN_FOLLOWERS: return True
     if user_str in KNOWN_NON_FOLLOWERS: return False
         
-    logger.info(f"🕵️ API Sorgusu: {user_id} takip ediyor mu?")
     try:
         user = client.get_user(id=user_id, user_fields=["connection_status"])
         if user.data and user.data.connection_status:
             if 'following' in user.data.connection_status:
-                logger.info(f"✅ {user_id} takip ediyor.")
                 KNOWN_FOLLOWERS.add(user_str)
                 if user_str in KNOWN_NON_FOLLOWERS: KNOWN_NON_FOLLOWERS.remove(user_str)
                 return True
             else:
-                logger.info(f"⛔ {user_id} takip etmiyor.")
                 KNOWN_NON_FOLLOWERS.add(user_str)
                 return False
         return False
-    except Exception as e:
-        logger.error(f"Takip hatası: {e}")
+    except Exception:
         return False
 
-# --- DM KONTROL (1 SORU BEDAVA MANTIĞI) ---
+# --- DM KONTROL (HATA KORUMALI) ---
 def check_dms():
     global ANSWERED_DM_IDS, USER_QUESTION_COUNTS
     logger.info("📨 DM Kutusu taranıyor...")
     
     try:
-        events = client.get_direct_message_events(max_results=15, event_types=["MessageCreate"])
+        events = client.get_direct_message_events(max_results=10, event_types=["MessageCreate"])
         if not events.data: return
 
         for event in reversed(events.data):
             if str(event.id) in ANSWERED_DM_IDS: continue
 
-            # Zaman kontrolü (2 saatten eski mesajları geç)
+            # Zaman kontrolü
             created_timestamp = int(event.created_at) / 1000 
             msg_time = datetime.fromtimestamp(created_timestamp, timezone.utc)
             now = datetime.now(timezone.utc)
@@ -150,27 +142,20 @@ def check_dms():
 
             if str(sender_id) == str(BOT_ID): continue
 
-            # --- MANTIK BAŞLIYOR ---
             sender_str = str(sender_id)
             soru_sayisi = USER_QUESTION_COUNTS.get(sender_str, 0)
             
-            logger.info(f"👤 Kullanıcı: {sender_id} | Mevcut Soru Sayısı: {soru_sayisi}")
-
-            # EĞER BU 2. VEYA DAHA SONRAKİ SORUYSA -> TAKİP ŞARTI KOY
+            # Takip Şartı
             if soru_sayisi >= 1:
                 if not is_user_following_safe(sender_id):
-                    logger.info(f"🚫 {sender_id} 1 hakkını doldurdu ve takip etmiyor. Cevap yok.")
-                    # Mesajı "okundu" sayıp geçiyoruz, cevap vermiyoruz.
                     ANSWERED_DM_IDS.add(str(event.id))
                     continue
             
-            # --- CEVAPLAMA BÖLÜMÜ ---
             logger.info(f"📩 İŞLENİYOR (DM): {text[:30]}...")
 
             fetva = get_fetva(text)
             if fetva:
                 try:
-                    # İlk soruysa altına not ekleyelim
                     ek_not = ""
                     if soru_sayisi == 0:
                         ek_not = "\n\n🎁 Bu sizin ilk ücretsiz sorunuzdu. Devamı için lütfen takip ediniz."
@@ -180,17 +165,21 @@ def check_dms():
                     client.create_direct_message(participant_id=sender_id, text=cevap)
                     logger.info(f"🚀 DM GÖNDERİLDİ! (Kime: {sender_id})")
                     
-                    # İşlem başarılı, sayacı artır ve hafızaya al
                     ANSWERED_DM_IDS.add(str(event.id))
                     USER_QUESTION_COUNTS[sender_str] = soru_sayisi + 1
                     time.sleep(5)
-
                 except Exception as e:
                     logger.error(f"DM Hata: {e}")
                     ANSWERED_DM_IDS.add(str(event.id))
 
     except Exception as e:
-        logger.error(f"DM Genel Hata: {e}")
+        # --- KRİTİK DÜZELTME BURADA ---
+        # Eğer Bağlantı hatası veya Rate Limit gelirse, 15 dakika uyumak yerine
+        # sadece log bas ve bu turu pas geç.
+        if "Connection" in str(e) or "reset by peer" in str(e):
+             logger.warning("⚠️ Twitter DM Sunucusu meşgul (Connection Reset). Bu tur pas geçildi.")
+        else:
+             logger.error(f"DM Genel Hata: {e}")
 
 # --- TWEET DÖNGÜSÜ ---
 def tweet_loop():
@@ -200,7 +189,7 @@ def tweet_loop():
     
     try:
         tweets = client.search_recent_tweets(
-            query=query, max_results=100, 
+            query=query, max_results=50, # 100 yerine 50 yaptık, daha hafif olsun
             expansions=["referenced_tweets.id", "author_id"],
             tweet_fields=["text", "referenced_tweets", "created_at"]
         )
@@ -208,7 +197,6 @@ def tweet_loop():
             for t in reversed(tweets.data):
                 if str(t.id) in ANSWERED_TWEET_IDS: continue
                 
-                # 1 saatten eski tweetleri cevaplama
                 tweet_time = t.created_at
                 now = datetime.now(timezone.utc)
                 if (now - tweet_time).total_seconds() > 3600:
@@ -239,11 +227,12 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (1 Soru Bedava + Sonrası Takip Şartı)")
+print("✅ Bot Başlatıldı (GÜVENLİ MOD - 150sn)")
 BOT_USERNAME = get_bot_username()
 
 try:
-    my_tweets = client.get_users_tweets(id=BOT_ID, max_results=100, tweet_fields=["referenced_tweets"])
+    logger.info("📂 Geçmiş taranıyor...")
+    my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
     if my_tweets.data:
         for t in my_tweets.data:
             if t.referenced_tweets and t.referenced_tweets[0].type == 'replied_to':
@@ -252,5 +241,12 @@ except: pass
 
 while True:
     tweet_loop()
-    check_dms()
-    time.sleep(100)
+    # DM Kontrolü bazen hata verirse programı durdurmasın
+    try:
+        check_dms()
+    except Exception as e:
+        logger.error(f"Döngü hatası: {e}")
+    
+    # GÜVENLİ BEKLEME SÜRESİ: 150 SANİYE (2.5 Dakika)
+    # Bu süre API'nin nefes almasını sağlar.
+    time.sleep(150)
