@@ -6,7 +6,7 @@ import os
 import logging
 import sys
 
-# --- LOGLAMA ---
+# --- LOGLAMA AYARLARI ---
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(message)s',
@@ -15,15 +15,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- AYARLAR ---
-# ID'yi yine de tutuyoruz ama asıl işimiz Kullanıcı Adı (Username) ile olacak.
-BOT_ID = 1997244309243060224  
-
-# Environment Variables
-if not os.environ.get("BEARER_TOKEN"):
-    logger.error("❌ HATA: Keyler eksik!")
+# --- KEY KONTROL ---
+required_keys = ["BEARER_TOKEN", "CONSUMER_KEY", "CONSUMER_SECRET", "ACCESS_TOKEN", "ACCESS_TOKEN_SECRET", "GROK_API_KEY"]
+if not all(os.environ.get(k) for k in required_keys):
+    logger.error("❌ HATA: Bazı Keyler Eksik! Render ayarlarını kontrol edin.")
     time.sleep(10)
     exit(1)
+
+# --- AYARLAR ---
+BOT_ID = 1997244309243060224  
 
 # Client Başlatma
 client = tweepy.Client(
@@ -32,7 +32,7 @@ client = tweepy.Client(
     consumer_secret=os.environ.get("CONSUMER_SECRET"),
     access_token=os.environ.get("ACCESS_TOKEN"),
     access_token_secret=os.environ.get("ACCESS_TOKEN_SECRET"),
-    wait_on_rate_limit=True  # 429 Limitinde otomatik bekle
+    wait_on_rate_limit=True
 )
 
 grok_client = OpenAI(
@@ -40,46 +40,31 @@ grok_client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
-# Global Değişkenler
-ANSWERED_IDS = set()
-BOT_USERNAME = None  # Otomatik doldurulacak (örn: XKadisi)
+# Global Hafızalar
+ANSWERED_TWEET_IDS = set()
+ANSWERED_DM_IDS = set() 
+BOT_USERNAME = None
 
 def get_bot_username():
-    """Botun kullanıcı adını (handle) öğrenir. Arama sorgusu için şarttır."""
     global BOT_USERNAME
     try:
         me = client.get_me()
         if me.data:
             BOT_USERNAME = me.data.username
-            logger.info(f"✅ Bot Kullanıcı Adı Tespit Edildi: @{BOT_USERNAME}")
+            logger.info(f"✅ Bot Kimliği: @{BOT_USERNAME}")
             return BOT_USERNAME
-    except Exception as e:
-        logger.error(f"Kullanıcı adı çekilemedi: {e}")
-        # Eğer API hatası olursa manuel fallback
+    except Exception:
         return "XKadisi"
 
-def get_context(tweet):
-    """Tweet bir yanıtsa veya alıntıysa üst tweeti çeker."""
-    if not tweet.referenced_tweets:
-        return None
-    
-    for ref in tweet.referenced_tweets:
-        if ref.type in ['replied_to', 'quoted']:
-            try:
-                parent = client.get_tweet(ref.id, tweet_fields=["text"])
-                if parent.data: return parent.data.text
-            except: pass
-    return None
-
 def get_fetva(soru, context=None):
-    """Grok-3 Fetva"""
-    prompt_text = f"Kullanıcı sorusu: {soru}"
-    if context: prompt_text += f"\n(Bağlam/Konu: '{context}')"
+    prompt_text = f"Soru: {soru}"
+    if context: prompt_text += f"\n(Bağlam: '{context}')"
 
     prompt = f"""
 {prompt_text}
 
-Dört Büyük Sünni Mezhebe (Hanefi, Şafiî, Mâlikî, Hanbelî) göre bu konunun detaylı ve delilli hükmünü açıkla.
+Dört Büyük Sünni Mezhebe (Hanefi, Şafiî, Mâlikî, Hanbelî) göre fıkhi hükmü detaylı ve delilli açıkla.
+
 Format:
 Hanefi: [Hüküm] (Kaynak)
 Şafiî: [Hüküm] (Kaynak)
@@ -99,87 +84,125 @@ Giriş/Bitiş cümlesi yazma.
         logger.error(f"Grok Hatası: {e}")
         return None
 
-def load_history():
-    """Hafıza Tazeleme (Başlangıçta)"""
-    ids = set()
-    logger.info("📂 Hafıza yükleniyor...")
-    try:
-        # Son 100 cevabımıza bakıyoruz
-        my_tweets = client.get_users_tweets(id=BOT_ID, max_results=100, tweet_fields=["referenced_tweets"])
-        if my_tweets.data:
-            for t in my_tweets.data:
-                if t.referenced_tweets:
-                    for r in t.referenced_tweets:
-                        if r.type == 'replied_to': ids.add(str(r.id))
-    except Exception: pass
-    return ids
+def get_context(tweet):
+    if not tweet.referenced_tweets: return None
+    for ref in tweet.referenced_tweets:
+        if ref.type in ['replied_to', 'quoted']:
+            try:
+                p = client.get_tweet(ref.id, tweet_fields=["text"])
+                if p.data: return p.data.text
+            except: pass
+    return None
 
-def main_loop():
-    global ANSWERED_IDS
-    
-    # SORGUMUZ: "@XKadisi" geçen tweetler (Retweetler hariç, kendi tweetlerimiz hariç)
-    query = f"@{BOT_USERNAME} -is:retweet -from:{BOT_USERNAME}"
-    
-    logger.info(f"🔎 ARAMA YAPILIYOR: '{query}'")
+# --- DM KONTROL FONKSİYONU ---
+def check_dms():
+    """DM Kutusunu kontrol eder ve cevaplar."""
+    global ANSWERED_DM_IDS
+    logger.info("📨 DM Kutusu kontrol ediliyor...")
     
     try:
-        # get_users_mentions YERİNE search_recent_tweets kullanıyoruz!
-        # Bu yöntem bildirim kutusuna değil, tüm Twitter'a bakar.
+        # Son DM olaylarını çek
+        events = client.get_direct_message_events(max_results=15, event_types=["MessageCreate"])
+        
+        if not events.data:
+            return
+
+        for event in reversed(events.data):
+            # DM ID'si hafızada mı?
+            if str(event.id) in ANSWERED_DM_IDS:
+                continue
+
+            # Mesajın içeriği ve gönderen
+            message_data = event.message_create['message_data']
+            sender_id = event.message_create['sender_id']
+            text = message_data['text']
+
+            # Kendi attığımız mesajları okumayalım
+            if str(sender_id) == str(BOT_ID):
+                continue
+            
+            logger.info(f"📩 YENİ DM: {text[:30]}... (Kimden: {sender_id})")
+
+            # Fetva Al
+            fetva = get_fetva(text)
+            if fetva:
+                try:
+                    cevap = f"Merhaba!\n\n{fetva}\n\n⚠️ Bu mesajdaki bilgilendirme genel niteliktedir. Lütfen @abdulazizguven'e danışın."
+                    
+                    # DM ile Cevap Gönder
+                    client.create_direct_message(participant_id=sender_id, text=cevap)
+                    logger.info(f"🚀 DM CEVAPLANDI! (Kime: {sender_id})")
+                    
+                    ANSWERED_DM_IDS.add(str(event.id))
+                    time.sleep(5)
+                except Exception as e:
+                    logger.error(f"❌ DM Gönderme Hatası: {e}")
+                    # Hata: 403 Forbidden alırsanız Keyleri yenilemeniz gerekir.
+                    if "403" in str(e):
+                        logger.error("⚠️ DİKKAT: Anahtarlarınızda DM yetkisi yok! Lütfen Developer Portal'dan 'Regenerate' yapın.")
+                    ANSWERED_DM_IDS.add(str(event.id)) 
+
+    except Exception as e:
+        logger.error(f"DM Hatası: {e}")
+
+def tweet_loop():
+    """Tweet Arama Döngüsü"""
+    global ANSWERED_TWEET_IDS
+    query = f"@{BOT_USERNAME} -is:retweet -from:{BOT_USERNAME}"
+    logger.info(f"🔎 Tweet Araması: '{query}'")
+    
+    try:
         tweets = client.search_recent_tweets(
-            query=query,
-            max_results=20, # Her seferinde en yeni 20 sonuç
+            query=query, max_results=100, 
             expansions=["referenced_tweets.id", "author_id"],
-            tweet_fields=["created_at", "text", "author_id", "referenced_tweets"]
+            tweet_fields=["text", "referenced_tweets"]
         )
+        if tweets.data:
+            for t in reversed(tweets.data):
+                if str(t.id) in ANSWERED_TWEET_IDS: continue
+                
+                raw = t.text.lower().replace(f"@{BOT_USERNAME.lower()}", "").strip()
+                ctx = None
+                if len(raw) < 5:
+                    ctx = get_context(t)
+                    if not ctx and not raw:
+                        ANSWERED_TWEET_IDS.add(str(t.id))
+                        continue
+                
+                q = raw if raw else "Bu durumun hükmü nedir?"
+                f = get_fetva(q, ctx)
+                if f:
+                    try:
+                        msg = f"Merhaba!\n\n{f}\n\n⚠️ Bu genel bilgilendirmedir. Lütfen @abdulazizguven'e danışın."
+                        client.create_tweet(text=msg, in_reply_to_tweet_id=t.id)
+                        logger.info(f"🚀 TWEET CEVAPLANDI! {t.id}")
+                        ANSWERED_TWEET_IDS.add(str(t.id))
+                        time.sleep(5)
+                    except Exception as e:
+                        logger.error(f"Tweet Hatası: {e}")
+                        ANSWERED_TWEET_IDS.add(str(t.id))
     except Exception as e:
         logger.error(f"Arama Hatası: {e}")
-        time.sleep(60)
-        return
-
-    if not tweets.data:
-        logger.info("📭 Arama sonucu boş.")
-        return
-
-    logger.info(f"📥 {len(tweets.data)} tweet bulundu.")
-
-    for tweet in reversed(tweets.data):
-        # Hafıza kontrolü
-        if str(tweet.id) in ANSWERED_IDS:
-            continue
-            
-        logger.info(f"👁️ İŞLENİYOR: {tweet.text[:40]}... (ID: {tweet.id})")
-        
-        # İşlem Mantığı (Aynı)
-        raw_text = tweet.text.lower().replace(f"@{BOT_USERNAME.lower()}", "").strip()
-        context = None
-        
-        if len(raw_text) < 5:
-            context = get_context(tweet)
-            if not context and not raw_text:
-                ANSWERED_IDS.add(str(tweet.id)) # Boşsa hafızaya at geç
-                continue
-        
-        q = raw_text if raw_text else "Bu durumun hükmü nedir?"
-        fetva = get_fetva(q, context)
-        
-        if fetva:
-            try:
-                msg = f"Merhaba!\n\n{fetva}\n\n⚠️ Bu genel bilgilendirmedir, mutlak fetva değildir. Lütfen @abdulazizguven'e danışın."
-                client.create_tweet(text=msg, in_reply_to_tweet_id=tweet.id)
-                logger.info(f"🚀 CEVAPLANDI! {tweet.id}")
-                ANSWERED_IDS.add(str(tweet.id))
-                time.sleep(5)
-            except Exception as e:
-                logger.error(f"Tweet hatası: {e}")
-                ANSWERED_IDS.add(str(tweet.id)) # Hata alsa da hafızaya al
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (SEARCH API / ARAMA MODU)")
-BOT_USERNAME = get_bot_username() # Kullanıcı adını öğren
-ANSWERED_IDS = load_history() # Geçmişi öğren
+print("✅ Bot Başlatıldı (Tweet + DM Modu)")
+BOT_USERNAME = get_bot_username()
+
+# Geçmiş tweetleri hafızaya al
+try:
+    my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
+    if my_tweets.data:
+        for t in my_tweets.data:
+            if t.referenced_tweets and t.referenced_tweets[0].type == 'replied_to':
+                ANSWERED_TWEET_IDS.add(str(t.referenced_tweets[0].id))
+except: pass
 
 while True:
-    main_loop()
-    # Search API limiti (Basic): 60 istek / 15 dk
-    # 60 saniyede 1 istek = 15 istek / 15 dk (Gayet güvenli)
-    time.sleep(60)
+    # 1. Tweetleri Kontrol Et
+    tweet_loop()
+    
+    # 2. DM'leri Kontrol Et
+    check_dms()
+    
+    # 3. Bekle (Her ikisi için ortak bekleme süresi)
+    time.sleep(70)
