@@ -26,7 +26,7 @@ if not all(os.environ.get(k) for k in required_keys):
 # --- AYARLAR ---
 BOT_ID = 1997244309243060224  
 
-# Client Başlatma
+# --- CLIENT BAŞLATMA ---
 client = tweepy.Client(
     bearer_token=os.environ.get("BEARER_TOKEN"),
     consumer_key=os.environ.get("CONSUMER_KEY"),
@@ -62,40 +62,51 @@ def get_fetva(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
-    # SIKI FIKIH TALİMATI
+    # --- SIKI FIKIH, DELİL VE REFERANS ANAYASASI ---
     system_prompt = """
-Sen, Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin (Hanefi, Şafiî, Mâlikî, Hanbelî) fıkıh usulüne ve furuuna hakim, son derece hassas bir fıkıh asistanısın.
+    Sen Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin fıkıh usulüne ve furuuna hakim bir fıkıh uzmanısın.
 
-GÖREVİN:
-Kullanıcının sorduğu dini sorulara, dört mezhebin en sahih (mutemed) görüşleriyle cevap vermektir.
+    GÖREVİN:
+    Kullanıcının sorusuna; önce meselenin genel hükmünü özetleyerek, ardından dört mezhebin delilli ve kaynaklı görüşleriyle cevap vermektir.
 
-KESİN KURALLAR:
-1. Hanefi Mezhebi için mutlaka 'Zahirü'r-rivaye' görüşlerini esas al. Şaz görüşleri yazma.
-   - ÖRNEK: İmama uyan kimsenin (muktedi) Fatiha okuması konusunda Hanefi mezhebinin hükmü "Okumaz, susar" şeklindedir. "İçinden okur" deme.
-2. Halüsinasyon görme. Bilmiyorsan cevap verme.
-3. Kaynak verirken uydurma kitap ismi verme. Klasik kaynakları referans göster.
-4. Yorum katma, sadece nakil yap.
+    KESİN KURALLAR:
+    1. GİRİŞ KISMI: "Meselenin Özü:" başlığı ile konuyu 1 cümleyle özetle.
+    
+    2. DELİL HASSASİYETİ (AYET/HADİS):
+       - Hükmü yazarken dayandığı Ayet veya Hadisi mutlaka belirt.
+       - AYET İSE: Mutlaka Sure Adı ve Ayet Numarasını yaz. (Örn: "...Nisa Suresi 43. ayet gereği...")
+       - HADİS İSE: Kütüb-i Sitte'deki yerini belirt. (Örn: "...hadis-i şerifine (Buhari, Savm, 3) dayanarak...")
 
-FORMAT:
-Hanefi: [Hüküm] (Kaynak: [Kitap Adı])
-Şafiî: [Hüküm] (Kaynak: [Kitap Adı])
-Mâlikî: [Hüküm] (Kaynak: [Kitap Adı])
-Hanbelî: [Hüküm] (Kaynak: [Kitap Adı])
+    3. KAYNAK VE NUMARA HASSASİYETİ (ÇOK ÖNEMLİ):
+       - Kitap ismi verirken sadece eser adını değil, mümkünse CİLT/SAYFA veya HADİS NUMARASINI da belirt.
+       - Format: "Yazar - Eser, [Cilt/Sayfa]" veya "Hadis Kaynağı, [Bölüm], [No]"
+       - Örn: "İbn Abidin - Reddü'l-Muhtar, Cilt 2, s.450"
+       - Örn: "İmam Nevevi - El-Mecmu, 4/120"
+       - Örn: "Buhari, İman, 4"
+       - Asla sadece "Mecmu" veya "Muğni" deme, tam referans ver.
 
-Giriş ve bitiş cümlesi yazma.
-"""
+    4. HANEFİ UYARISI: Hanefi mezhebinde mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
+
+    ÇIKTI FORMATI:
+    Meselenin Özü: [Özet]
+
+    Hanefi: [Hüküm + Ayet/Hadis Delili] (Kaynak: [Yazar - Eser, Cilt/Sayfa])
+    Şafiî: [Hüküm + Ayet/Hadis Delili] (Kaynak: [Yazar - Eser, Cilt/Sayfa])
+    Mâlikî: [Hüküm + Ayet/Hadis Delili] (Kaynak: [Yazar - Eser, Cilt/Sayfa])
+    Hanbelî: [Hüküm + Ayet/Hadis Delili] (Kaynak: [Yazar - Eser, Cilt/Sayfa])
+
+    Başka hiçbir giriş veya bitiş cümlesi yazma.
+    """
 
     try:
         r = grok_client.chat.completions.create(
-            # --- DÜZELTİLEN KISIM BURASI ---
-            model="grok-3", # Hata mesajının istediği model ismi
-            # -------------------------------
+            model="grok-3", 
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text}
             ],
-            max_tokens=1000, 
-            temperature=0.2 
+            max_tokens=1200, 
+            temperature=0.2 # Ciddiyet (Halüsinasyon engelleme)
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
@@ -128,10 +139,9 @@ def tweet_loop():
             for t in reversed(tweets.data):
                 if str(t.id) in ANSWERED_TWEET_IDS: continue
                 
-                # --- ZAMAN FİLTRESİ: 3 SAAT ---
+                # ZAMAN FİLTRESİ: 3 SAAT
                 tweet_time = t.created_at
                 now = datetime.now(timezone.utc)
-                # 3 Saat = 10800 Saniye
                 if (now - tweet_time).total_seconds() > 10800:
                     ANSWERED_TWEET_IDS.add(str(t.id))
                     continue
@@ -155,19 +165,20 @@ def tweet_loop():
                         client.create_tweet(text=msg, in_reply_to_tweet_id=t.id)
                         logger.info(f"🚀 CEVAPLANDI! {t.id}")
                         ANSWERED_TWEET_IDS.add(str(t.id))
-                        time.sleep(5)
+                        time.sleep(5) 
                     except Exception as e:
-                        logger.error(f"Tweet Hatası: {e}")
+                        logger.error(f"Tweet Gönderme Hatası: {e}")
                         ANSWERED_TWEET_IDS.add(str(t.id))
     except Exception as e:
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GROK-3 + SIKI FIKIH + 3 SAAT)")
+print("✅ Bot Başlatıldı (GROK-3 + CİLT/SAYFA REFERANSLI)")
 BOT_USERNAME = get_bot_username()
 
+# Geçmiş tweetleri hafızaya al
 try:
-    logger.info("📂 Geçmiş taranıyor...")
+    logger.info("📂 Geçmiş cevaplar taranıyor...")
     my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
     if my_tweets.data:
         for t in my_tweets.data:
