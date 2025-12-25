@@ -5,7 +5,7 @@ import time
 import os
 import logging
 import sys
-from datetime import datetime, timedelta, timezone # <-- YENİ EKLENDİ
+from datetime import datetime, timedelta, timezone
 
 # --- LOGLAMA ---
 logging.basicConfig(
@@ -16,7 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- KEY KONTROL ---
+# --- KEYLER ---
 required_keys = ["BEARER_TOKEN", "CONSUMER_KEY", "CONSUMER_SECRET", "ACCESS_TOKEN", "ACCESS_TOKEN_SECRET", "GROK_API_KEY"]
 if not all(os.environ.get(k) for k in required_keys):
     logger.error("❌ HATA: Keyler eksik!")
@@ -41,9 +41,15 @@ grok_client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
-# Global Hafızalar
+# --- HAFIZA SİSTEMLERİ ---
 ANSWERED_TWEET_IDS = set()
 ANSWERED_DM_IDS = set() 
+
+# KİM KAÇ SORU SORDU? (Freemium Hafızası)
+USER_QUESTION_COUNTS = {} 
+
+KNOWN_FOLLOWERS = set()
+KNOWN_NON_FOLLOWERS = set()
 BOT_USERNAME = None
 
 def get_bot_username():
@@ -95,10 +101,34 @@ def get_context(tweet):
             except: pass
     return None
 
-# --- DM KONTROL ---
+# --- TAKİPÇİ KONTROLÜ (Kota Dostu) ---
+def is_user_following_safe(user_id):
+    user_str = str(user_id)
+    if user_str in KNOWN_FOLLOWERS: return True
+    if user_str in KNOWN_NON_FOLLOWERS: return False
+        
+    logger.info(f"🕵️ API Sorgusu: {user_id} takip ediyor mu?")
+    try:
+        user = client.get_user(id=user_id, user_fields=["connection_status"])
+        if user.data and user.data.connection_status:
+            if 'following' in user.data.connection_status:
+                logger.info(f"✅ {user_id} takip ediyor.")
+                KNOWN_FOLLOWERS.add(user_str)
+                if user_str in KNOWN_NON_FOLLOWERS: KNOWN_NON_FOLLOWERS.remove(user_str)
+                return True
+            else:
+                logger.info(f"⛔ {user_id} takip etmiyor.")
+                KNOWN_NON_FOLLOWERS.add(user_str)
+                return False
+        return False
+    except Exception as e:
+        logger.error(f"Takip hatası: {e}")
+        return False
+
+# --- DM KONTROL (1 SORU BEDAVA MANTIĞI) ---
 def check_dms():
-    global ANSWERED_DM_IDS
-    logger.info("📨 DM Kutusu kontrol ediliyor...")
+    global ANSWERED_DM_IDS, USER_QUESTION_COUNTS
+    logger.info("📨 DM Kutusu taranıyor...")
     
     try:
         events = client.get_direct_message_events(max_results=15, event_types=["MessageCreate"])
@@ -107,39 +137,60 @@ def check_dms():
         for event in reversed(events.data):
             if str(event.id) in ANSWERED_DM_IDS: continue
 
-            # --- ZAMAN KONTROLÜ (DM) ---
-            # DM'in atıldığı zamanı milisaniyeden saniyeye çevir
+            # Zaman kontrolü (2 saatten eski mesajları geç)
             created_timestamp = int(event.created_at) / 1000 
             msg_time = datetime.fromtimestamp(created_timestamp, timezone.utc)
             now = datetime.now(timezone.utc)
-
-            # 2 saatten eskiyse cevaplama (Bot kapalıyken gelen çok eski mesajlar için)
             if (now - msg_time).total_seconds() > 7200:
                 ANSWERED_DM_IDS.add(str(event.id))
                 continue
-            # ---------------------------
 
             sender_id = event.message_create['sender_id']
             text = event.message_create['message_data']['text']
 
             if str(sender_id) == str(BOT_ID): continue
+
+            # --- MANTIK BAŞLIYOR ---
+            sender_str = str(sender_id)
+            soru_sayisi = USER_QUESTION_COUNTS.get(sender_str, 0)
             
-            logger.info(f"📩 YENİ DM: {text[:30]}... (Kimden: {sender_id})")
+            logger.info(f"👤 Kullanıcı: {sender_id} | Mevcut Soru Sayısı: {soru_sayisi}")
+
+            # EĞER BU 2. VEYA DAHA SONRAKİ SORUYSA -> TAKİP ŞARTI KOY
+            if soru_sayisi >= 1:
+                if not is_user_following_safe(sender_id):
+                    logger.info(f"🚫 {sender_id} 1 hakkını doldurdu ve takip etmiyor. Cevap yok.")
+                    # Mesajı "okundu" sayıp geçiyoruz, cevap vermiyoruz.
+                    ANSWERED_DM_IDS.add(str(event.id))
+                    continue
+            
+            # --- CEVAPLAMA BÖLÜMÜ ---
+            logger.info(f"📩 İŞLENİYOR (DM): {text[:30]}...")
 
             fetva = get_fetva(text)
             if fetva:
                 try:
-                    cevap = f"Merhaba!\n\n{fetva}\n\n⚠️ Bu mesajdaki bilgilendirme genel niteliktedir. Lütfen @abdulazizguven'e danışın."
+                    # İlk soruysa altına not ekleyelim
+                    ek_not = ""
+                    if soru_sayisi == 0:
+                        ek_not = "\n\n🎁 Bu sizin ilk ücretsiz sorunuzdu. Devamı için lütfen takip ediniz."
+                    
+                    cevap = f"Merhaba!\n\n{fetva}\n\n⚠️ Genel bilgilendirmedir.{ek_not}"
+                    
                     client.create_direct_message(participant_id=sender_id, text=cevap)
-                    logger.info(f"🚀 DM CEVAPLANDI! (Kime: {sender_id})")
+                    logger.info(f"🚀 DM GÖNDERİLDİ! (Kime: {sender_id})")
+                    
+                    # İşlem başarılı, sayacı artır ve hafızaya al
                     ANSWERED_DM_IDS.add(str(event.id))
+                    USER_QUESTION_COUNTS[sender_str] = soru_sayisi + 1
                     time.sleep(5)
+
                 except Exception as e:
                     logger.error(f"DM Hata: {e}")
-                    ANSWERED_DM_IDS.add(str(event.id)) 
+                    ANSWERED_DM_IDS.add(str(event.id))
 
     except Exception as e:
-        logger.error(f"DM Hatası: {e}")
+        logger.error(f"DM Genel Hata: {e}")
 
 # --- TWEET DÖNGÜSÜ ---
 def tweet_loop():
@@ -151,23 +202,18 @@ def tweet_loop():
         tweets = client.search_recent_tweets(
             query=query, max_results=100, 
             expansions=["referenced_tweets.id", "author_id"],
-            tweet_fields=["text", "referenced_tweets", "created_at"] # created_at istedik
+            tweet_fields=["text", "referenced_tweets", "created_at"]
         )
         if tweets.data:
             for t in reversed(tweets.data):
                 if str(t.id) in ANSWERED_TWEET_IDS: continue
                 
-                # --- ZAMAN KONTROLÜ (KRİTİK) ---
-                # Tweetin atıldığı zaman
+                # 1 saatten eski tweetleri cevaplama
                 tweet_time = t.created_at
                 now = datetime.now(timezone.utc)
-                
-                # Eğer tweet 60 dakikadan (3600 saniye) daha eskiyse cevaplama!
                 if (now - tweet_time).total_seconds() > 3600:
-                    # Eski tweetleri de hafızaya al ki bir daha sormasın
                     ANSWERED_TWEET_IDS.add(str(t.id))
                     continue
-                # -------------------------------
 
                 raw = t.text.lower().replace(f"@{BOT_USERNAME.lower()}", "").strip()
                 ctx = None
@@ -176,8 +222,6 @@ def tweet_loop():
                     if not ctx and not raw:
                         ANSWERED_TWEET_IDS.add(str(t.id))
                         continue
-                
-                logger.info(f"👁️ İŞLENİYOR: {raw[:30]}...")
                 
                 q = raw if raw else "Bu durumun hükmü nedir?"
                 f = get_fetva(q, ctx)
@@ -195,12 +239,10 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (Zaman Korumalı Mod)")
+print("✅ Bot Başlatıldı (1 Soru Bedava + Sonrası Takip Şartı)")
 BOT_USERNAME = get_bot_username()
 
-# Geçmişi yine de yükle (Max 100 yaptık)
 try:
-    logger.info("📂 Geçmiş cevaplar yükleniyor...")
     my_tweets = client.get_users_tweets(id=BOT_ID, max_results=100, tweet_fields=["referenced_tweets"])
     if my_tweets.data:
         for t in my_tweets.data:
