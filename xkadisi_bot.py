@@ -5,8 +5,9 @@ import time
 import os
 import logging
 import sys
+from datetime import datetime, timedelta, timezone # <-- YENİ EKLENDİ
 
-# --- LOGLAMA AYARLARI ---
+# --- LOGLAMA ---
 logging.basicConfig(
     level=logging.INFO, 
     format='%(asctime)s - %(message)s',
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 # --- KEY KONTROL ---
 required_keys = ["BEARER_TOKEN", "CONSUMER_KEY", "CONSUMER_SECRET", "ACCESS_TOKEN", "ACCESS_TOKEN_SECRET", "GROK_API_KEY"]
 if not all(os.environ.get(k) for k in required_keys):
-    logger.error("❌ HATA: Bazı Keyler Eksik! Render ayarlarını kontrol edin.")
+    logger.error("❌ HATA: Keyler eksik!")
     time.sleep(10)
     exit(1)
 
@@ -94,59 +95,54 @@ def get_context(tweet):
             except: pass
     return None
 
-# --- DM KONTROL FONKSİYONU ---
+# --- DM KONTROL ---
 def check_dms():
-    """DM Kutusunu kontrol eder ve cevaplar."""
     global ANSWERED_DM_IDS
     logger.info("📨 DM Kutusu kontrol ediliyor...")
     
     try:
-        # Son DM olaylarını çek
         events = client.get_direct_message_events(max_results=15, event_types=["MessageCreate"])
-        
-        if not events.data:
-            return
+        if not events.data: return
 
         for event in reversed(events.data):
-            # DM ID'si hafızada mı?
-            if str(event.id) in ANSWERED_DM_IDS:
-                continue
+            if str(event.id) in ANSWERED_DM_IDS: continue
 
-            # Mesajın içeriği ve gönderen
-            message_data = event.message_create['message_data']
+            # --- ZAMAN KONTROLÜ (DM) ---
+            # DM'in atıldığı zamanı milisaniyeden saniyeye çevir
+            created_timestamp = int(event.created_at) / 1000 
+            msg_time = datetime.fromtimestamp(created_timestamp, timezone.utc)
+            now = datetime.now(timezone.utc)
+
+            # 2 saatten eskiyse cevaplama (Bot kapalıyken gelen çok eski mesajlar için)
+            if (now - msg_time).total_seconds() > 7200:
+                ANSWERED_DM_IDS.add(str(event.id))
+                continue
+            # ---------------------------
+
             sender_id = event.message_create['sender_id']
-            text = message_data['text']
+            text = event.message_create['message_data']['text']
 
-            # Kendi attığımız mesajları okumayalım
-            if str(sender_id) == str(BOT_ID):
-                continue
+            if str(sender_id) == str(BOT_ID): continue
             
             logger.info(f"📩 YENİ DM: {text[:30]}... (Kimden: {sender_id})")
 
-            # Fetva Al
             fetva = get_fetva(text)
             if fetva:
                 try:
                     cevap = f"Merhaba!\n\n{fetva}\n\n⚠️ Bu mesajdaki bilgilendirme genel niteliktedir. Lütfen @abdulazizguven'e danışın."
-                    
-                    # DM ile Cevap Gönder
                     client.create_direct_message(participant_id=sender_id, text=cevap)
                     logger.info(f"🚀 DM CEVAPLANDI! (Kime: {sender_id})")
-                    
                     ANSWERED_DM_IDS.add(str(event.id))
                     time.sleep(5)
                 except Exception as e:
-                    logger.error(f"❌ DM Gönderme Hatası: {e}")
-                    # Hata: 403 Forbidden alırsanız Keyleri yenilemeniz gerekir.
-                    if "403" in str(e):
-                        logger.error("⚠️ DİKKAT: Anahtarlarınızda DM yetkisi yok! Lütfen Developer Portal'dan 'Regenerate' yapın.")
+                    logger.error(f"DM Hata: {e}")
                     ANSWERED_DM_IDS.add(str(event.id)) 
 
     except Exception as e:
         logger.error(f"DM Hatası: {e}")
 
+# --- TWEET DÖNGÜSÜ ---
 def tweet_loop():
-    """Tweet Arama Döngüsü"""
     global ANSWERED_TWEET_IDS
     query = f"@{BOT_USERNAME} -is:retweet -from:{BOT_USERNAME}"
     logger.info(f"🔎 Tweet Araması: '{query}'")
@@ -155,12 +151,24 @@ def tweet_loop():
         tweets = client.search_recent_tweets(
             query=query, max_results=100, 
             expansions=["referenced_tweets.id", "author_id"],
-            tweet_fields=["text", "referenced_tweets"]
+            tweet_fields=["text", "referenced_tweets", "created_at"] # created_at istedik
         )
         if tweets.data:
             for t in reversed(tweets.data):
                 if str(t.id) in ANSWERED_TWEET_IDS: continue
                 
+                # --- ZAMAN KONTROLÜ (KRİTİK) ---
+                # Tweetin atıldığı zaman
+                tweet_time = t.created_at
+                now = datetime.now(timezone.utc)
+                
+                # Eğer tweet 60 dakikadan (3600 saniye) daha eskiyse cevaplama!
+                if (now - tweet_time).total_seconds() > 3600:
+                    # Eski tweetleri de hafızaya al ki bir daha sormasın
+                    ANSWERED_TWEET_IDS.add(str(t.id))
+                    continue
+                # -------------------------------
+
                 raw = t.text.lower().replace(f"@{BOT_USERNAME.lower()}", "").strip()
                 ctx = None
                 if len(raw) < 5:
@@ -168,6 +176,8 @@ def tweet_loop():
                     if not ctx and not raw:
                         ANSWERED_TWEET_IDS.add(str(t.id))
                         continue
+                
+                logger.info(f"👁️ İŞLENİYOR: {raw[:30]}...")
                 
                 q = raw if raw else "Bu durumun hükmü nedir?"
                 f = get_fetva(q, ctx)
@@ -185,12 +195,13 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (Tweet + DM Modu)")
+print("✅ Bot Başlatıldı (Zaman Korumalı Mod)")
 BOT_USERNAME = get_bot_username()
 
-# Geçmiş tweetleri hafızaya al
+# Geçmişi yine de yükle (Max 100 yaptık)
 try:
-    my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
+    logger.info("📂 Geçmiş cevaplar yükleniyor...")
+    my_tweets = client.get_users_tweets(id=BOT_ID, max_results=100, tweet_fields=["referenced_tweets"])
     if my_tweets.data:
         for t in my_tweets.data:
             if t.referenced_tweets and t.referenced_tweets[0].type == 'replied_to':
@@ -198,11 +209,6 @@ try:
 except: pass
 
 while True:
-    # 1. Tweetleri Kontrol Et
     tweet_loop()
-    
-    # 2. DM'leri Kontrol Et
     check_dms()
-    
-    # 3. Bekle (Her ikisi için ortak bekleme süresi)
     time.sleep(70)
