@@ -87,7 +87,9 @@ Giriş ve bitiş cümlesi yazma.
 
     try:
         r = grok_client.chat.completions.create(
-            model="grok-2-latest",
+            # --- DÜZELTİLEN KISIM BURASI ---
+            model="grok-beta", # "grok-2-latest" yerine çalışan resmi sürüm
+            # -------------------------------
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text}
@@ -126,14 +128,12 @@ def tweet_loop():
             for t in reversed(tweets.data):
                 if str(t.id) in ANSWERED_TWEET_IDS: continue
                 
-                # --- ZAMAN FİLTRESİ GÜNCELLENDİ: 3 SAAT ---
+                # --- ZAMAN FİLTRESİ: 3 SAAT ---
                 tweet_time = t.created_at
                 now = datetime.now(timezone.utc)
-                # 3 Saat = 10800 Saniye
                 if (now - tweet_time).total_seconds() > 10800:
                     ANSWERED_TWEET_IDS.add(str(t.id))
                     continue
-                # ------------------------------------------
 
                 raw = t.text.lower().replace(f"@{BOT_USERNAME.lower()}", "").strip()
                 ctx = None
@@ -162,7 +162,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GROK + SIKI FIKIH + 3 SAAT GEÇMİŞ)")
+print("✅ Bot Başlatıldı (GROK-BETA + SIKI FIKIH + 3 SAAT)")
 BOT_USERNAME = get_bot_username()
 
 try:
