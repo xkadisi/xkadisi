@@ -16,17 +16,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- KEY KONTROL ---
+# --- KEYLER ---
 required_keys = ["BEARER_TOKEN", "CONSUMER_KEY", "CONSUMER_SECRET", "ACCESS_TOKEN", "ACCESS_TOKEN_SECRET", "GROK_API_KEY"]
 if not all(os.environ.get(k) for k in required_keys):
-    logger.error("❌ HATA: Keyler eksik! Render ayarlarını kontrol edin.")
+    logger.error("❌ HATA: Keyler eksik!")
     time.sleep(10)
     exit(1)
 
 # --- AYARLAR ---
 BOT_ID = 1997244309243060224  
 
-# Client Başlatma
+# Client
 client = tweepy.Client(
     bearer_token=os.environ.get("BEARER_TOKEN"),
     consumer_key=os.environ.get("CONSUMER_KEY"),
@@ -41,7 +41,7 @@ grok_client = OpenAI(
     base_url="https://api.x.ai/v1"
 )
 
-# --- HAFIZA SİSTEMLERİ ---
+# --- HAFIZA ---
 ANSWERED_TWEET_IDS = set()
 ANSWERED_DM_IDS = set() 
 USER_QUESTION_COUNTS = {} 
@@ -117,7 +117,7 @@ def is_user_following_safe(user_id):
     except Exception:
         return False
 
-# --- DM KONTROL (HATA KORUMALI) ---
+# --- DM KONTROL ---
 def check_dms():
     global ANSWERED_DM_IDS, USER_QUESTION_COUNTS
     logger.info("📨 DM Kutusu taranıyor...")
@@ -144,7 +144,6 @@ def check_dms():
             sender_str = str(sender_id)
             soru_sayisi = USER_QUESTION_COUNTS.get(sender_str, 0)
             
-            # Takip Şartı
             if soru_sayisi >= 1:
                 if not is_user_following_safe(sender_id):
                     ANSWERED_DM_IDS.add(str(event.id))
@@ -158,12 +157,9 @@ def check_dms():
                     ek_not = ""
                     if soru_sayisi == 0:
                         ek_not = "\n\n🎁 Bu sizin ilk ücretsiz sorunuzdu. Devamı için lütfen takip ediniz."
-                    
                     cevap = f"Merhaba!\n\n{fetva}\n\n⚠️ Genel bilgilendirmedir.{ek_not}"
-                    
                     client.create_direct_message(participant_id=sender_id, text=cevap)
                     logger.info(f"🚀 DM GÖNDERİLDİ! (Kime: {sender_id})")
-                    
                     ANSWERED_DM_IDS.add(str(event.id))
                     USER_QUESTION_COUNTS[sender_str] = soru_sayisi + 1
                     time.sleep(5)
@@ -173,7 +169,7 @@ def check_dms():
 
     except Exception as e:
         if "Connection" in str(e) or "reset by peer" in str(e):
-             logger.warning("⚠️ Twitter DM Sunucusu meşgul. Bu tur pas geçildi.")
+             logger.warning("⚠️ DM Sunucusu meşgul. Pas geçildi.")
         else:
              logger.error(f"DM Genel Hata: {e}")
 
@@ -223,11 +219,10 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (Akıllı Dağıtık Mod - DM Seyreltilmiş)")
+print("✅ Bot Başlatıldı (SOĞUK BAŞLANGIÇ MODU)")
 BOT_USERNAME = get_bot_username()
 
 try:
-    logger.info("📂 Geçmiş taranıyor...")
     my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
     if my_tweets.data:
         for t in my_tweets.data:
@@ -235,24 +230,29 @@ try:
                 ANSWERED_TWEET_IDS.add(str(t.referenced_tweets[0].id))
 except: pass
 
-# --- DÖNGÜ SAYACI ---
-loop_counter = 0
+# --- KRİTİK DEĞİŞİKLİK BURADA ---
+# Başlangıcı 1 yapıyoruz ki ilk açılışta DM'e bakmasın.
+loop_counter = 1 
 
 while True:
-    # 1. Her zaman Tweet kontrol et
+    # 1. Tweetleri her zaman kontrol et (Limitleri daha esnek)
     tweet_loop()
     
-    # 2. DM Kontrolünü sadece her 4 turda bir yap (4 x 150sn = 10 Dakikada bir)
-    # Bu sayede DM limiti aşılmaz.
+    # 2. DM'leri sadece 4 turda bir kontrol et (10-12 dakikada bir)
+    # modül (%) işlemi kalana bakar. 
+    # 1. Tur: 1/4 kalan 1 -> BAKMA
+    # 2. Tur: 2/4 kalan 2 -> BAKMA
+    # 3. Tur: 3/4 kalan 3 -> BAKMA
+    # 4. Tur: 4/4 kalan 0 -> BAK!
     if loop_counter % 4 == 0:
         try:
             check_dms()
         except Exception as e:
             logger.error(f"Döngü hatası: {e}")
     else:
-        logger.info("⏳ DM kontrolü bu turda atlandı (Limit koruması).")
+        logger.info(f"⏳ DM kontrolü için sıranın gelmesi bekleniyor... ({loop_counter % 4}/4)")
 
     loop_counter += 1
     
-    # Bekleme Süresi (Sabit)
+    # Bekleme (150 saniye)
     time.sleep(150)
