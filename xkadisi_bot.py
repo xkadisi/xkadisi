@@ -17,7 +17,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- KEY KONTROL ---
-# Tekrar GROK keylerine döndük
 required_keys = ["BEARER_TOKEN", "CONSUMER_KEY", "CONSUMER_SECRET", "ACCESS_TOKEN", "ACCESS_TOKEN_SECRET", "GROK_API_KEY"]
 if not all(os.environ.get(k) for k in required_keys):
     logger.error("❌ HATA: Keyler eksik! Render ayarlarını kontrol edin.")
@@ -58,12 +57,12 @@ def get_bot_username():
     except Exception:
         return "XKadisi"
 
-# --- GELİŞMİŞ FETVA FONKSİYONU (GROK İÇİN ÖZELLEŞTİRİLDİ) ---
+# --- GELİŞMİŞ FETVA FONKSİYONU ---
 def get_fetva(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
-    # GROK'A VERİLEN SIKI TALİMAT
+    # SIKI FIKIH TALİMATI
     system_prompt = """
 Sen, Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin (Hanefi, Şafiî, Mâlikî, Hanbelî) fıkıh usulüne ve furuuna hakim, son derece hassas bir fıkıh asistanısın.
 
@@ -71,10 +70,10 @@ GÖREVİN:
 Kullanıcının sorduğu dini sorulara, dört mezhebin en sahih (mutemed) görüşleriyle cevap vermektir.
 
 KESİN KURALLAR:
-1. Hanefi Mezhebi için mutlaka 'Zahirü'r-rivaye' (İmam-ı Azam, İmam Ebu Yusuf, İmam Muhammed) görüşlerini esas al. Şaz veya zayıf görüşleri asla yazma.
-   - ÖRNEK: İmama uyan kimsenin (muktedi) Fatiha okuması konusunda Hanefi mezhebinin hükmü "Okumaz, susar" şeklindedir (Tahrimen mekruhtur). Sakın "içinden okur" deme.
-2. Halüsinasyon görme (Uydurma bilgi verme). Bilmiyorsan veya emin değilsen cevap verme.
-3. Kaynak verirken uydurma kitap ismi verme. Klasik kaynakları (Reddü'l-Muhtar, El-Mebsut, El-Umm, El-Muğni) referans göster.
+1. Hanefi Mezhebi için mutlaka 'Zahirü'r-rivaye' görüşlerini esas al. Şaz görüşleri yazma.
+   - ÖRNEK: İmama uyan kimsenin (muktedi) Fatiha okuması konusunda Hanefi mezhebinin hükmü "Okumaz, susar" şeklindedir. "İçinden okur" deme.
+2. Halüsinasyon görme. Bilmiyorsan cevap verme.
+3. Kaynak verirken uydurma kitap ismi verme. Klasik kaynakları referans göster.
 4. Yorum katma, sadece nakil yap.
 
 FORMAT:
@@ -83,18 +82,18 @@ Hanefi: [Hüküm] (Kaynak: [Kitap Adı])
 Mâlikî: [Hüküm] (Kaynak: [Kitap Adı])
 Hanbelî: [Hüküm] (Kaynak: [Kitap Adı])
 
-Giriş ve bitiş cümlesi yazma. Sadece formatı ver.
+Giriş ve bitiş cümlesi yazma.
 """
 
     try:
         r = grok_client.chat.completions.create(
-            model="grok-2-latest", # En akıllı Grok modelini kullanıyoruz
+            model="grok-2-latest",
             messages=[
-                {"role": "system", "content": system_prompt}, # Beyin Ayarı
-                {"role": "user", "content": prompt_text}      # Soru
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_text}
             ],
             max_tokens=1000, 
-            temperature=0.2 # Düşük sıcaklık = Daha az hata, daha çok ciddiyet
+            temperature=0.2 
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
@@ -127,12 +126,14 @@ def tweet_loop():
             for t in reversed(tweets.data):
                 if str(t.id) in ANSWERED_TWEET_IDS: continue
                 
-                # Zaman Filtresi (1 Saat)
+                # --- ZAMAN FİLTRESİ GÜNCELLENDİ: 3 SAAT ---
                 tweet_time = t.created_at
                 now = datetime.now(timezone.utc)
-                if (now - tweet_time).total_seconds() > 3600:
+                # 3 Saat = 10800 Saniye
+                if (now - tweet_time).total_seconds() > 10800:
                     ANSWERED_TWEET_IDS.add(str(t.id))
                     continue
+                # ------------------------------------------
 
                 raw = t.text.lower().replace(f"@{BOT_USERNAME.lower()}", "").strip()
                 ctx = None
@@ -161,7 +162,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GROK + SIKI FIKIH KURALLARI - DM KAPALI)")
+print("✅ Bot Başlatıldı (GROK + SIKI FIKIH + 3 SAAT GEÇMİŞ)")
 BOT_USERNAME = get_bot_username()
 
 try:
