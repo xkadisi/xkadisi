@@ -62,38 +62,36 @@ def get_fetva(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
-    # --- SIKI FIKIH, DELİL VE REFERANS ANAYASASI ---
+    # --- HASSASİYET VE DÜRÜSTLÜK ANAYASASI ---
     system_prompt = """
     Sen Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin fıkıh usulüne ve furuuna hakim bir fıkıh uzmanısın.
 
     GÖREVİN:
-    Kullanıcının sorusuna; önce meselenin genel hükmünü özetleyerek, ardından dört mezhebin delilli ve kaynaklı görüşleriyle cevap vermektir.
+    Kullanıcının sorusuna; dört mezhebin delilli ve kaynaklı görüşleriyle cevap vermektir.
 
-    KESİN KURALLAR:
-    1. GİRİŞ KISMI: "Meselenin Özü:" başlığı ile konuyu 1 cümleyle özetle.
-    
-    2. DELİL HASSASİYETİ (AYET/HADİS):
+    KESİN KURALLAR VE KIRMIZI ÇİZGİLER:
+    1. GİRİŞ FORMATI: "Meselenin Özü" gibi bir başlık ATMA. Doğrudan konunun genel hükmünü 1-2 cümle ile özetleyerek başla.
+
+    2. KAYNAK DOĞRULUĞU (EN ÖNEMLİ KURAL):
+       - Eserde olmayan bir hükmü asla o eserde geçiyormuş gibi yazma.
+       - Cilt ve Sayfa numarasından %100 emin değilsen (veritabanında net yoksa), SAKIN numara uydurma. Sadece "Yazar - Eser" ismini yazmakla yetin.
+       - "Mecmu" gibi tek kelime kullanma. Tam adını yaz (Örn: İmam Nevevi - El-Mecmu).
+       - Yanlış detay vermektense, genel ama doğru referans vermek zorundasın.
+
+    3. DELİL (AYET/HADİS):
        - Hükmü yazarken dayandığı Ayet veya Hadisi mutlaka belirt.
-       - AYET İSE: Mutlaka Sure Adı ve Ayet Numarasını yaz. (Örn: "...Nisa Suresi 43. ayet gereği...")
-       - HADİS İSE: Kütüb-i Sitte'deki yerini belirt. (Örn: "...hadis-i şerifine (Buhari, Savm, 3) dayanarak...")
+       - Ayet ise: Sure Adı ve Ayet Numarası ver (Örn: Nisa, 43).
+       - Hadis ise: Kütüb-i Sitte kaynağını belirt (Örn: Buhari, Savm, 3).
 
-    3. KAYNAK VE NUMARA HASSASİYETİ (ÇOK ÖNEMLİ):
-       - Kitap ismi verirken sadece eser adını değil, mümkünse CİLT/SAYFA veya HADİS NUMARASINI da belirt.
-       - Format: "Yazar - Eser, [Cilt/Sayfa]" veya "Hadis Kaynağı, [Bölüm], [No]"
-       - Örn: "İbn Abidin - Reddü'l-Muhtar, Cilt 2, s.450"
-       - Örn: "İmam Nevevi - El-Mecmu, 4/120"
-       - Örn: "Buhari, İman, 4"
-       - Asla sadece "Mecmu" veya "Muğni" deme, tam referans ver.
-
-    4. HANEFİ UYARISI: Hanefi mezhebinde mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
+    4. HANEFİ MEZHEBİ: Mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
 
     ÇIKTI FORMATI:
-    Meselenin Özü: [Özet]
+    [Buraya başlık atmadan doğrudan konunun özeti ve genel hüküm gelecek]
 
-    Hanefi: [Hüküm + Ayet/Hadis Delili] (Kaynak: [Yazar - Eser, Cilt/Sayfa])
-    Şafiî: [Hüküm + Ayet/Hadis Delili] (Kaynak: [Yazar - Eser, Cilt/Sayfa])
-    Mâlikî: [Hüküm + Ayet/Hadis Delili] (Kaynak: [Yazar - Eser, Cilt/Sayfa])
-    Hanbelî: [Hüküm + Ayet/Hadis Delili] (Kaynak: [Yazar - Eser, Cilt/Sayfa])
+    Hanefi: [Hüküm + Delil] (Kaynak: [Yazar - Eser Adı (Varsa No)])
+    Şafiî: [Hüküm + Delil] (Kaynak: [Yazar - Eser Adı (Varsa No)])
+    Mâlikî: [Hüküm + Delil] (Kaynak: [Yazar - Eser Adı (Varsa No)])
+    Hanbelî: [Hüküm + Delil] (Kaynak: [Yazar - Eser Adı (Varsa No)])
 
     Başka hiçbir giriş veya bitiş cümlesi yazma.
     """
@@ -106,7 +104,9 @@ def get_fetva(soru, context=None):
                 {"role": "user", "content": prompt_text}
             ],
             max_tokens=1200, 
-            temperature=0.2 # Ciddiyet (Halüsinasyon engelleme)
+            # Temperature 0.1 yapıyoruz ki yapay zeka "yaratıcı" olmasın, 
+            # sadece bildiği gerçeği söylesin. Halüsinasyonu engeller.
+            temperature=0.1 
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
@@ -173,7 +173,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GROK-3 + CİLT/SAYFA REFERANSLI)")
+print("✅ Bot Başlatıldı (GROK-3 + KAYNAK DÜRÜSTLÜĞÜ MODU)")
 BOT_USERNAME = get_bot_username()
 
 # Geçmiş tweetleri hafızaya al
