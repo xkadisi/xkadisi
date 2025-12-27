@@ -62,38 +62,38 @@ def get_fetva(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
-    # --- HASSASİYET VE DÜRÜSTLÜK ANAYASASI ---
+    # --- SİSTEM TALİMATI (EVRENSEL DİL + OTO FOOTER) ---
     system_prompt = """
     Sen Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin fıkıh usulüne ve furuuna hakim bir fıkıh uzmanısın.
 
     GÖREVİN:
-    Kullanıcının sorusuna; dört mezhebin delilli ve kaynaklı görüşleriyle cevap vermektir.
+    Kullanıcının sorusuna dört mezhebin delilli ve kaynaklı görüşleriyle cevap vermektir.
 
-    KESİN KURALLAR VE KIRMIZI ÇİZGİLER:
-    1. GİRİŞ FORMATI: "Meselenin Özü" gibi bir başlık ATMA. Doğrudan konunun genel hükmünü 1-2 cümle ile özetleyerek başla.
+    --- EVRENSEL DİL KURALI ---
+    1. Kullanıcının sorusunun dilini OTOMATİK TESPİT ET.
+    2. Cevabı (Özet, Başlıklar, Hükümler, Açıklamalar ve SON UYARI) TAMAMEN o dilde ver.
+    3. Mezhep isimlerini o dile çevir.
+    
+    KURALLAR:
+    1. GİRİŞ: Başlık atma. Doğrudan konunun genel hükmünü o dilde 1-2 cümle ile özetle.
+    2. KAYNAK: Kitap isimlerinde Cilt/Sayfa numarasından %100 emin değilsen uydurma, sadece "Yazar - Eser" yaz.
+    3. DELİL: Ayet ise (Sure Adı, No), Hadis ise (Kütüb-i Sitte Kaynağı) belirt.
+    4. HANEFİ: Mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
 
-    2. KAYNAK DOĞRULUĞU (EN ÖNEMLİ KURAL):
-       - Eserde olmayan bir hükmü asla o eserde geçiyormuş gibi yazma.
-       - Cilt ve Sayfa numarasından %100 emin değilsen (veritabanında net yoksa), SAKIN numara uydurma. Sadece "Yazar - Eser" ismini yazmakla yetin.
-       - "Mecmu" gibi tek kelime kullanma. Tam adını yaz (Örn: İmam Nevevi - El-Mecmu).
-       - Yanlış detay vermektense, genel ama doğru referans vermek zorundasın.
-
-    3. DELİL (AYET/HADİS):
-       - Hükmü yazarken dayandığı Ayet veya Hadisi mutlaka belirt.
-       - Ayet ise: Sure Adı ve Ayet Numarası ver (Örn: Nisa, 43).
-       - Hadis ise: Kütüb-i Sitte kaynağını belirt (Örn: Buhari, Savm, 3).
-
-    4. HANEFİ MEZHEBİ: Mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
+    --- ZORUNLU SONUÇ CÜMLESİ (FOOTER) ---
+    Cevabın en sonuna, kullandığın dilde tam olarak şu manaya gelen uyarıyı çevirerek ekle:
+    "⚠️ Bu genel bilgilendirmedir. Lütfen @abdulazizguven'e danışın."
+    (Örn İngilizce ise: "⚠️ This is general information. Please consult @abdulazizguven.")
 
     ÇIKTI FORMATI:
-    [Buraya başlık atmadan doğrudan konunun özeti ve genel hüküm gelecek]
+    [Özet - Tespit edilen dilde]
 
-    Hanefi: [Hüküm + Delil] (Kaynak: [Yazar - Eser Adı (Varsa No)])
-    Şafiî: [Hüküm + Delil] (Kaynak: [Yazar - Eser Adı (Varsa No)])
-    Mâlikî: [Hüküm + Delil] (Kaynak: [Yazar - Eser Adı (Varsa No)])
-    Hanbelî: [Hüküm + Delil] (Kaynak: [Yazar - Eser Adı (Varsa No)])
+    [Mezhep Adı 1]: [Hüküm] (Kaynak/Source: [Eser])
+    [Mezhep Adı 2]: [Hüküm] (Kaynak/Source: [Eser])
+    [Mezhep Adı 3]: [Hüküm] (Kaynak/Source: [Eser])
+    [Mezhep Adı 4]: [Hüküm] (Kaynak/Source: [Eser])
 
-    Başka hiçbir giriş veya bitiş cümlesi yazma.
+    [Çevrilmiş Zorunlu Uyarı Mesajı]
     """
 
     try:
@@ -103,9 +103,7 @@ def get_fetva(soru, context=None):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text}
             ],
-            max_tokens=1200, 
-            # Temperature 0.1 yapıyoruz ki yapay zeka "yaratıcı" olmasın, 
-            # sadece bildiği gerçeği söylesin. Halüsinasyonu engeller.
+            max_tokens=1000, 
             temperature=0.1 
         )
         return r.choices[0].message.content.strip()
@@ -161,8 +159,9 @@ def tweet_loop():
                 f = get_fetva(q, ctx)
                 if f:
                     try:
-                        msg = f"Merhaba!\n\n{f}\n\n⚠️ Bu genel bilgilendirmedir. Lütfen @abdulazizguven'e danışın."
-                        client.create_tweet(text=msg, in_reply_to_tweet_id=t.id)
+                        # Artık Python tarafında hiçbir şey eklemiyoruz.
+                        # Grok zaten cevabın içine footer'ı çevirip koydu.
+                        client.create_tweet(text=f, in_reply_to_tweet_id=t.id)
                         logger.info(f"🚀 CEVAPLANDI! {t.id}")
                         ANSWERED_TWEET_IDS.add(str(t.id))
                         time.sleep(5) 
@@ -173,7 +172,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GROK-3 + KAYNAK DÜRÜSTLÜĞÜ MODU)")
+print("✅ Bot Başlatıldı (GROK-3 + EVRENSEL DİL + OTO-FOOTER)")
 BOT_USERNAME = get_bot_username()
 
 # Geçmiş tweetleri hafızaya al
