@@ -44,15 +44,18 @@ grok_client = OpenAI(
 
 # --- HAFIZA ---
 ANSWERED_TWEET_IDS = set()
+ANSWERED_DM_IDS = set() # DM'ler için hafıza
 BOT_USERNAME = None
 
 def get_bot_username():
     global BOT_USERNAME
+    global BOT_ID
     try:
         me = client.get_me()
         if me.data:
             BOT_USERNAME = me.data.username
-            logger.info(f"✅ Bot Kimliği: @{BOT_USERNAME}")
+            BOT_ID = me.data.id # ID'yi dinamik olarak alıp güncelliyoruz
+            logger.info(f"✅ Bot Kimliği: @{BOT_USERNAME} (ID: {BOT_ID})")
             return BOT_USERNAME
     except Exception:
         return "XKadisi"
@@ -75,11 +78,7 @@ def get_fetva(soru, context=None):
     3. Mezhep isimlerini o dile çevir.
     
     KURALLAR:
-    1. GİRİŞ (ÖNEMLİ): 
-       - ASLA başlık atma.
-       - ASLA "[Summary]", "[Özet]", "Meselenin Özü:" gibi etiketler kullanma.
-       - Doğrudan konunun genel hükmünü anlatan cümle ile başla.
-       
+    1. GİRİŞ: Başlık atma. Doğrudan konunun genel hükmünü o dilde 1-2 cümle ile özetle.
     2. KAYNAK: Kitap isimlerinde Cilt/Sayfa numarasından %100 emin değilsen uydurma, sadece "Yazar - Eser" yaz.
     3. DELİL: Ayet ise (Sure Adı, No), Hadis ise (Kütüb-i Sitte Kaynağı) belirt.
     4. HANEFİ: Mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
@@ -124,6 +123,39 @@ def get_context(tweet):
             except: pass
     return None
 
+# --- DM KONTROL FONKSİYONU ---
+def check_dms():
+    global ANSWERED_DM_IDS
+    try:
+        # Son 10 DM etkinliğini çek
+        response = client.get_direct_message_events(max_results=10, expansion='sender_id')
+        
+        if not response.data: return
+
+        for event in response.data:
+            if event.event_type == 'MessageCreate':
+                dm_id = event.id
+                sender_id = event.message_create['sender_id']
+                
+                # Mesajı atan ben değilsem VE daha önce cevaplamadıysam
+                if str(sender_id) != str(BOT_ID) and dm_id not in ANSWERED_DM_IDS:
+                    
+                    # Otomatik Cevap Metni
+                    msg = "Merhaba! 👋\n\nDM üzerinden soru alımımız henüz aktif değildir (Yakında açılacaktır).\n\nLütfen sorunuzu beni (@XKadisi) etiketleyerek TWEET olarak atınız. Anında cevaplayacağım.\n\nAnlayışınız için teşekkürler!"
+                    
+                    try:
+                        client.create_direct_message(participant_id=sender_id, text=msg)
+                        logger.info(f"📩 DM OTO-CEVAP yollandı: {sender_id}")
+                        ANSWERED_DM_IDS.add(dm_id)
+                        time.sleep(2)
+                    except Exception as e:
+                        logger.error(f"DM Gönderme Hatası: {e}")
+                        ANSWERED_DM_IDS.add(dm_id) # Hata alsa da işaretle ki döngüye girmesin
+
+    except Exception as e:
+        # Genelde 403 Hatası verir eğer izinler ayarlı değilse
+        logger.error(f"DM Kontrol Hatası (İzinleri kontrol edin): {e}")
+
 # --- TWEET DÖNGÜSÜ ---
 def tweet_loop():
     global ANSWERED_TWEET_IDS
@@ -140,7 +172,6 @@ def tweet_loop():
             for t in reversed(tweets.data):
                 if str(t.id) in ANSWERED_TWEET_IDS: continue
                 
-                # ZAMAN FİLTRESİ: 3 SAAT
                 tweet_time = t.created_at
                 now = datetime.now(timezone.utc)
                 if (now - tweet_time).total_seconds() > 10800:
@@ -162,7 +193,6 @@ def tweet_loop():
                 f = get_fetva(q, ctx)
                 if f:
                     try:
-                        # Grok cevabı hazırladı (başlıksız ve footerlı)
                         client.create_tweet(text=f, in_reply_to_tweet_id=t.id)
                         logger.info(f"🚀 CEVAPLANDI! {t.id}")
                         ANSWERED_TWEET_IDS.add(str(t.id))
@@ -174,7 +204,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GROK-3 + BAŞLIKSIZ TEMİZ FORMAT)")
+print("✅ Bot Başlatıldı (TWEET + DM OTO CEVAP)")
 BOT_USERNAME = get_bot_username()
 
 # Geçmiş tweetleri hafızaya al
@@ -188,5 +218,10 @@ try:
 except: pass
 
 while True:
+    # 1. Tweetleri Kontrol Et
     tweet_loop()
+    
+    # 2. DM'leri Kontrol Et
+    check_dms()
+    
     time.sleep(90)
