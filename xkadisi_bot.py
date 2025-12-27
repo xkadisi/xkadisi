@@ -194,4 +194,4 @@ except: pass
 while True:
     tweet_loop()
     logger.info("⏳ 200 saniye bekleniyor...")
-    time.sleep(200)
+    time.sleep(90)
