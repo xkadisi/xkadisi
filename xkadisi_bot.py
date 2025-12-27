@@ -126,7 +126,6 @@ def get_context(tweet):
 def check_dms():
     global ANSWERED_DM_IDS
     try:
-        # DÜZELTİLEN SATIR: expansion -> expansions (çoğul olmalı)
         response = client.get_direct_message_events(max_results=10, expansions=['sender_id'])
         
         if not response.data: return
@@ -134,13 +133,11 @@ def check_dms():
         for event in response.data:
             if event.event_type == 'MessageCreate':
                 dm_id = event.id
-                # DM verisi bazen karmaşık olabilir, güvenli erişim
                 if event.message_create and 'sender_id' in event.message_create:
                     sender_id = event.message_create['sender_id']
                 else:
                     continue
                 
-                # Mesajı atan ben değilsem VE daha önce cevaplamadıysam
                 if str(sender_id) != str(BOT_ID) and dm_id not in ANSWERED_DM_IDS:
                     
                     msg = "Merhaba! 👋\n\nDM üzerinden soru alımımız henüz aktif değildir (Yakında açılacaktır).\n\nLütfen sorunuzu beni (@XKadisi) etiketleyerek TWEET olarak atınız. Anında cevaplayacağım.\n\nAnlayışınız için teşekkürler!"
@@ -155,7 +152,6 @@ def check_dms():
                         ANSWERED_DM_IDS.add(dm_id) 
 
     except Exception as e:
-        # 403 alırsanız Developer Portal'dan 'Read, Write, and Direct Messages' iznini kontrol edin.
         logger.error(f"DM Kontrol Hatası: {e}")
 
 # --- TWEET DÖNGÜSÜ ---
@@ -206,10 +202,9 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (TWEET + DM OTO CEVAP [FIXED])")
+print("✅ Bot Başlatıldı (GÜVENLİ FREKANS MODU)")
 BOT_USERNAME = get_bot_username()
 
-# Geçmiş tweetleri hafızaya al
 try:
     logger.info("📂 Geçmiş cevaplar taranıyor...")
     my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
@@ -222,4 +217,10 @@ except: pass
 while True:
     tweet_loop()
     check_dms()
-    time.sleep(90)
+    
+    # --- DEĞİŞTİ: 90sn -> 200sn ---
+    # Rate limit (429) hatasını önlemek için süreyi uzattık.
+    # 200 saniye = 3 dakika 20 saniye. 
+    # Bu hızla 15 dakikada ~4 sorgu yaparız, limit 15 olduğu için %100 güvende oluruz.
+    logger.info("⏳ 200 saniye bekleniyor...")
+    time.sleep(200)
