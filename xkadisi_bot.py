@@ -62,7 +62,7 @@ def get_fetva(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
-    # --- SİSTEM TALİMATI (EVRENSEL DİL + OTO FOOTER) ---
+    # --- SİSTEM TALİMATI ---
     system_prompt = """
     Sen Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin fıkıh usulüne ve furuuna hakim bir fıkıh uzmanısın.
 
@@ -71,11 +71,15 @@ def get_fetva(soru, context=None):
 
     --- EVRENSEL DİL KURALI ---
     1. Kullanıcının sorusunun dilini OTOMATİK TESPİT ET.
-    2. Cevabı (Özet, Başlıklar, Hükümler, Açıklamalar ve SON UYARI) TAMAMEN o dilde ver.
+    2. Cevabı (Özet, Hükümler, Açıklamalar ve SON UYARI) TAMAMEN o dilde ver.
     3. Mezhep isimlerini o dile çevir.
     
     KURALLAR:
-    1. GİRİŞ: Başlık atma. Doğrudan konunun genel hükmünü o dilde 1-2 cümle ile özetle.
+    1. GİRİŞ (ÖNEMLİ): 
+       - ASLA başlık atma.
+       - ASLA "[Summary]", "[Özet]", "Meselenin Özü:" gibi etiketler kullanma.
+       - Doğrudan konunun genel hükmünü anlatan cümle ile başla.
+       
     2. KAYNAK: Kitap isimlerinde Cilt/Sayfa numarasından %100 emin değilsen uydurma, sadece "Yazar - Eser" yaz.
     3. DELİL: Ayet ise (Sure Adı, No), Hadis ise (Kütüb-i Sitte Kaynağı) belirt.
     4. HANEFİ: Mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
@@ -83,10 +87,9 @@ def get_fetva(soru, context=None):
     --- ZORUNLU SONUÇ CÜMLESİ (FOOTER) ---
     Cevabın en sonuna, kullandığın dilde tam olarak şu manaya gelen uyarıyı çevirerek ekle:
     "⚠️ Bu genel bilgilendirmedir. Lütfen @abdulazizguven'e danışın."
-    (Örn İngilizce ise: "⚠️ This is general information. Please consult @abdulazizguven.")
 
     ÇIKTI FORMATI:
-    [Özet - Tespit edilen dilde]
+    [Buraya doğrudan özet cümlesi gelecek, başlık yok]
 
     [Mezhep Adı 1]: [Hüküm] (Kaynak/Source: [Eser])
     [Mezhep Adı 2]: [Hüküm] (Kaynak/Source: [Eser])
@@ -159,8 +162,7 @@ def tweet_loop():
                 f = get_fetva(q, ctx)
                 if f:
                     try:
-                        # Artık Python tarafında hiçbir şey eklemiyoruz.
-                        # Grok zaten cevabın içine footer'ı çevirip koydu.
+                        # Grok cevabı hazırladı (başlıksız ve footerlı)
                         client.create_tweet(text=f, in_reply_to_tweet_id=t.id)
                         logger.info(f"🚀 CEVAPLANDI! {t.id}")
                         ANSWERED_TWEET_IDS.add(str(t.id))
@@ -172,7 +174,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GROK-3 + EVRENSEL DİL + OTO-FOOTER)")
+print("✅ Bot Başlatıldı (GROK-3 + BAŞLIKSIZ TEMİZ FORMAT)")
 BOT_USERNAME = get_bot_username()
 
 # Geçmiş tweetleri hafızaya al
