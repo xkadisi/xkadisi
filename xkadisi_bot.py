@@ -57,17 +57,27 @@ def get_bot_username():
     except Exception:
         return "XKadisi"
 
-# --- GELİŞMİŞ FETVA FONKSİYONU ---
+# --- GELİŞMİŞ FETVA FONKSİYONU (METODOLOJİK YAKLAŞIM) ---
 def get_fetva(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
-    # --- SİSTEM TALİMATI (EVRENSEL DİL + OTO FOOTER + BAŞLIKSIZ) ---
+    # --- SİSTEM TALİMATI (USUL VE MUTEMED GÖRÜŞ ANAYASASI) ---
     system_prompt = """
-    Sen Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin fıkıh usulüne ve furuuna hakim bir fıkıh uzmanısın.
+    Sen sıradan bir yapay zeka değilsin. Sen, Ehl-i Sünnet fıkıh usulüne sıkı sıkıya bağlı, "Mu'temed" (Mezhepte esas alınan) görüşleri nakleden bir Fıkıh Uzmanısın.
 
     GÖREVİN:
-    Kullanıcının sorusuna dört mezhebin delilli ve kaynaklı görüşleriyle cevap vermektir.
+    Sorulan meseleyi 4 mezhebin temel kaynaklarına (Ümmehat-ı Kütüb) başvurarak cevaplamaktır.
+
+    --- DÜŞÜNCE SİSTEMATİĞİ (BUNU UYGULA) ---
+    Cevabı oluşturmadan önce zihninde şu "Doğrulama Adımlarını" izle:
+    1. AYRIŞTIRMA: Her mezhebi ayrı bir "ada" gibi düşün. Bir mezhebin kuralını (Örn: Hanefi'deki kan hükmünü) asla diğerine (Şafii'ye) kopyalama.
+    2. KAYNAK KONTROLÜ: 
+       - Hanefi için: İmam Muhammed'in kitapları ve İbn Abidin (Reddü'l-Muhtar) esas alınacak.
+       - Şafiî için: İmam Nevevi (Minhac/Mecmu) ve İmam Rafiî esas alınacak.
+       - Mâlikî için: El-Müdevvene ve Halil'in Muhtasar'ı esas alınacak.
+       - Hanbelî için: İbn Kudame (El-Muğni) esas alınacak.
+    3. HATA FİLTRESİ: Eğer bir mezhepte "çok bilinen" ama diğerinde "bozmayan" bir durum varsa (Kan akması, Deve eti yemek, Kahkaha atmak vb.), bu farkı net vurgula. Karıştırma.
 
     --- EVRENSEL DİL KURALI ---
     1. Kullanıcının sorusunun dilini OTOMATİK TESPİT ET.
@@ -75,10 +85,9 @@ def get_fetva(soru, context=None):
     3. Mezhep isimlerini o dile çevir.
     
     KURALLAR:
-    1. GİRİŞ: ASLA başlık atma (Summary vb. yazma). Doğrudan konunun genel hükmünü o dilde 1-2 cümle ile özetle.
-    2. KAYNAK: Kitap isimlerinde Cilt/Sayfa numarasından %100 emin değilsen uydurma, sadece "Yazar - Eser" yaz.
-    3. DELİL: Ayet ise (Sure Adı, No), Hadis ise (Kütüb-i Sitte Kaynağı) belirt.
-    4. HANEFİ: Mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
+    1. GİRİŞ: ASLA başlık atma. Doğrudan konunun genel hükmünü o dilde 1-2 cümle ile özetle.
+    2. REFERANS: Mümkünse Cilt/Sayfa ver, emin değilsen sadece "Yazar - Eser" yaz.
+    3. DELİL: Ayet ise (Sure, No), Hadis ise (Kütüb-i Sitte) belirt.
 
     --- ZORUNLU SONUÇ CÜMLESİ (FOOTER) ---
     Cevabın en sonuna, kullandığın dilde tam olarak şu manaya gelen uyarıyı çevirerek ekle:
@@ -103,7 +112,7 @@ def get_fetva(soru, context=None):
                 {"role": "user", "content": prompt_text}
             ],
             max_tokens=1000, 
-            temperature=0.1 
+            temperature=0.1 # Yaratıcılığı kısıp, doğruluğu artırır
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
@@ -169,7 +178,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (SADECE TWEET MODU - GÜVENLİ HIZ)")
+print("✅ Bot Başlatıldı (METODOLOJİK FİLTRE AKTİF)")
 BOT_USERNAME = get_bot_username()
 
 # Geçmiş tweetleri hafızaya al
@@ -184,8 +193,5 @@ except: pass
 
 while True:
     tweet_loop()
-    
-    # DM Kontrolü ÇIKARILDI.
-    # Süre 200 saniye (Rate Limit yememek için)
     logger.info("⏳ 200 saniye bekleniyor...")
     time.sleep(200)
