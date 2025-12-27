@@ -44,18 +44,15 @@ grok_client = OpenAI(
 
 # --- HAFIZA ---
 ANSWERED_TWEET_IDS = set()
-ANSWERED_DM_IDS = set() 
 BOT_USERNAME = None
 
 def get_bot_username():
     global BOT_USERNAME
-    global BOT_ID
     try:
         me = client.get_me()
         if me.data:
             BOT_USERNAME = me.data.username
-            BOT_ID = me.data.id 
-            logger.info(f"✅ Bot Kimliği: @{BOT_USERNAME} (ID: {BOT_ID})")
+            logger.info(f"✅ Bot Kimliği: @{BOT_USERNAME}")
             return BOT_USERNAME
     except Exception:
         return "XKadisi"
@@ -65,6 +62,7 @@ def get_fetva(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
+    # --- SİSTEM TALİMATI (EVRENSEL DİL + OTO FOOTER + BAŞLIKSIZ) ---
     system_prompt = """
     Sen Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin fıkıh usulüne ve furuuna hakim bir fıkıh uzmanısın.
 
@@ -77,7 +75,7 @@ def get_fetva(soru, context=None):
     3. Mezhep isimlerini o dile çevir.
     
     KURALLAR:
-    1. GİRİŞ: Başlık atma. Doğrudan konunun genel hükmünü o dilde 1-2 cümle ile özetle.
+    1. GİRİŞ: ASLA başlık atma (Summary vb. yazma). Doğrudan konunun genel hükmünü o dilde 1-2 cümle ile özetle.
     2. KAYNAK: Kitap isimlerinde Cilt/Sayfa numarasından %100 emin değilsen uydurma, sadece "Yazar - Eser" yaz.
     3. DELİL: Ayet ise (Sure Adı, No), Hadis ise (Kütüb-i Sitte Kaynağı) belirt.
     4. HANEFİ: Mutlaka 'Zahirü'r-rivaye' görüşünü esas al.
@@ -122,38 +120,6 @@ def get_context(tweet):
             except: pass
     return None
 
-# --- DM KONTROL FONKSİYONU ---
-def check_dms():
-    global ANSWERED_DM_IDS
-    try:
-        response = client.get_direct_message_events(max_results=10, expansions=['sender_id'])
-        
-        if not response.data: return
-
-        for event in response.data:
-            if event.event_type == 'MessageCreate':
-                dm_id = event.id
-                if event.message_create and 'sender_id' in event.message_create:
-                    sender_id = event.message_create['sender_id']
-                else:
-                    continue
-                
-                if str(sender_id) != str(BOT_ID) and dm_id not in ANSWERED_DM_IDS:
-                    
-                    msg = "Merhaba! 👋\n\nDM üzerinden soru alımımız henüz aktif değildir (Yakında açılacaktır).\n\nLütfen sorunuzu beni (@XKadisi) etiketleyerek TWEET olarak atınız. Anında cevaplayacağım.\n\nAnlayışınız için teşekkürler!"
-                    
-                    try:
-                        client.create_direct_message(participant_id=sender_id, text=msg)
-                        logger.info(f"📩 DM OTO-CEVAP yollandı: {sender_id}")
-                        ANSWERED_DM_IDS.add(dm_id)
-                        time.sleep(2)
-                    except Exception as e:
-                        logger.error(f"DM Gönderme Hatası: {e}")
-                        ANSWERED_DM_IDS.add(dm_id) 
-
-    except Exception as e:
-        logger.error(f"DM Kontrol Hatası: {e}")
-
 # --- TWEET DÖNGÜSÜ ---
 def tweet_loop():
     global ANSWERED_TWEET_IDS
@@ -170,6 +136,7 @@ def tweet_loop():
             for t in reversed(tweets.data):
                 if str(t.id) in ANSWERED_TWEET_IDS: continue
                 
+                # ZAMAN FİLTRESİ: 3 SAAT
                 tweet_time = t.created_at
                 now = datetime.now(timezone.utc)
                 if (now - tweet_time).total_seconds() > 10800:
@@ -202,9 +169,10 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (GÜVENLİ FREKANS MODU)")
+print("✅ Bot Başlatıldı (SADECE TWEET MODU - GÜVENLİ HIZ)")
 BOT_USERNAME = get_bot_username()
 
+# Geçmiş tweetleri hafızaya al
 try:
     logger.info("📂 Geçmiş cevaplar taranıyor...")
     my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
@@ -216,11 +184,8 @@ except: pass
 
 while True:
     tweet_loop()
-    check_dms()
     
-    # --- DEĞİŞTİ: 90sn -> 200sn ---
-    # Rate limit (429) hatasını önlemek için süreyi uzattık.
-    # 200 saniye = 3 dakika 20 saniye. 
-    # Bu hızla 15 dakikada ~4 sorgu yaparız, limit 15 olduğu için %100 güvende oluruz.
+    # DM Kontrolü ÇIKARILDI.
+    # Süre 200 saniye (Rate Limit yememek için)
     logger.info("⏳ 200 saniye bekleniyor...")
     time.sleep(200)
