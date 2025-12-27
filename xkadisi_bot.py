@@ -44,7 +44,7 @@ grok_client = OpenAI(
 
 # --- HAFIZA ---
 ANSWERED_TWEET_IDS = set()
-ANSWERED_DM_IDS = set() # DM'ler için hafıza
+ANSWERED_DM_IDS = set() 
 BOT_USERNAME = None
 
 def get_bot_username():
@@ -54,7 +54,7 @@ def get_bot_username():
         me = client.get_me()
         if me.data:
             BOT_USERNAME = me.data.username
-            BOT_ID = me.data.id # ID'yi dinamik olarak alıp güncelliyoruz
+            BOT_ID = me.data.id 
             logger.info(f"✅ Bot Kimliği: @{BOT_USERNAME} (ID: {BOT_ID})")
             return BOT_USERNAME
     except Exception:
@@ -65,7 +65,6 @@ def get_fetva(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
-    # --- SİSTEM TALİMATI ---
     system_prompt = """
     Sen Ehl-i Sünnet vel-Cemaat çizgisinde, dört mezhebin fıkıh usulüne ve furuuna hakim bir fıkıh uzmanısın.
 
@@ -127,20 +126,23 @@ def get_context(tweet):
 def check_dms():
     global ANSWERED_DM_IDS
     try:
-        # Son 10 DM etkinliğini çek
-        response = client.get_direct_message_events(max_results=10, expansion='sender_id')
+        # DÜZELTİLEN SATIR: expansion -> expansions (çoğul olmalı)
+        response = client.get_direct_message_events(max_results=10, expansions=['sender_id'])
         
         if not response.data: return
 
         for event in response.data:
             if event.event_type == 'MessageCreate':
                 dm_id = event.id
-                sender_id = event.message_create['sender_id']
+                # DM verisi bazen karmaşık olabilir, güvenli erişim
+                if event.message_create and 'sender_id' in event.message_create:
+                    sender_id = event.message_create['sender_id']
+                else:
+                    continue
                 
                 # Mesajı atan ben değilsem VE daha önce cevaplamadıysam
                 if str(sender_id) != str(BOT_ID) and dm_id not in ANSWERED_DM_IDS:
                     
-                    # Otomatik Cevap Metni
                     msg = "Merhaba! 👋\n\nDM üzerinden soru alımımız henüz aktif değildir (Yakında açılacaktır).\n\nLütfen sorunuzu beni (@XKadisi) etiketleyerek TWEET olarak atınız. Anında cevaplayacağım.\n\nAnlayışınız için teşekkürler!"
                     
                     try:
@@ -150,11 +152,11 @@ def check_dms():
                         time.sleep(2)
                     except Exception as e:
                         logger.error(f"DM Gönderme Hatası: {e}")
-                        ANSWERED_DM_IDS.add(dm_id) # Hata alsa da işaretle ki döngüye girmesin
+                        ANSWERED_DM_IDS.add(dm_id) 
 
     except Exception as e:
-        # Genelde 403 Hatası verir eğer izinler ayarlı değilse
-        logger.error(f"DM Kontrol Hatası (İzinleri kontrol edin): {e}")
+        # 403 alırsanız Developer Portal'dan 'Read, Write, and Direct Messages' iznini kontrol edin.
+        logger.error(f"DM Kontrol Hatası: {e}")
 
 # --- TWEET DÖNGÜSÜ ---
 def tweet_loop():
@@ -204,7 +206,7 @@ def tweet_loop():
         logger.error(f"Arama Hatası: {e}")
 
 # --- BAŞLATMA ---
-print("✅ Bot Başlatıldı (TWEET + DM OTO CEVAP)")
+print("✅ Bot Başlatıldı (TWEET + DM OTO CEVAP [FIXED])")
 BOT_USERNAME = get_bot_username()
 
 # Geçmiş tweetleri hafızaya al
@@ -218,10 +220,6 @@ try:
 except: pass
 
 while True:
-    # 1. Tweetleri Kontrol Et
     tweet_loop()
-    
-    # 2. DM'leri Kontrol Et
     check_dms()
-    
     time.sleep(90)
