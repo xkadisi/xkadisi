@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import threading
 import tweepy
-from openai import OpenAI  # <--- EKLENDİ: Kodun çalışması için şart
+from openai import OpenAI 
 import time
 import os
 import logging
@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 if not os.environ.get("GROK_API_KEY"):
     logger.error("❌ HATA: GROK_API_KEY eksik! Render ayarlarını kontrol edin.")
 
-# Grok Client (Eksikti, eklendi)
+# Grok Client 
 grok_client = OpenAI(
     api_key=os.environ.get("GROK_API_KEY"),
     base_url="https://api.x.ai/v1",
-    timeout=90.0,
+    timeout=90.0, # <--- GÜNCELLENDİ: 90 Saniye sabır (Bağlantı hatasını önler)
     max_retries=3
 )
 
@@ -66,7 +66,6 @@ def get_fetva_twitter(soru, context=None):
     prompt_text = f"KULLANICI SORUSU: {soru}"
     if context: prompt_text += f"\n(BAĞLAM: '{context}')"
 
-    # SENİN İSTEDİĞİN PROMPT (DEĞİŞTİRİLMEDİ)
     system_prompt = """
     Sen "X Kadısı" isminde, Ehl-i Sünnet kaynaklarına (İbn Abidin, Nevevi, İbn Kudame) hakim bir Fıkıh Uzmanısın.
 
@@ -124,7 +123,6 @@ def get_fetva_twitter(soru, context=None):
 # BÖLÜM B: WEB SİTESİ FETVA (Grok-3)
 # =====================================================
 def get_fetva_web(soru):
-    # SENİN İSTEDİĞİN PROMPT (DEĞİŞTİRİLMEDİ)
     system_prompt = """
     KİMLİK:
     Sen "Fukaha Meclisi"nin yapay zeka asistanısın. Ehl-i Sünnet ve'l Cemaat çizgisinde, 4 Hak Mezhebe (Hanefi, Şafii, Maliki, Hanbeli) hakim, ilmi derinliği olan bir fıkıh alimisin.
@@ -156,7 +154,7 @@ def get_fetva_web(soru):
     <b>🟧 HANBELİ:</b> [Hüküm] (Kaynak: İbn Kudame)<br>
 
     <br><br><b>⚠️ SONUÇ VE TAVSİYE:</b><br>
-    Kıymetli kardeşim, bu bilgiler genel fıkhi kaidelere dayanmaktadır. Durumunuzun özel detayları veya şüpheli noktalar için lütfen sitemizdeki <b>"Soru Sor"</b> butonunu kullanarak veya doğrudan <b>Abdülaziz Güven</b> hocamıza ulaşarak fetva alınız.<br>
+    Kıymetli kardeşim, bu bilgiler genel fıkhi kaidelere dayanmaktadır. Durumunuzun özel detayları veya şüpheli noktalar için lütfen sitemizdeki <b>"Soru Sor"</b> butonunu kullanarak fetva alınız.<br>
     Rabbim ilminizi artırsın. (Amin).
 
     --- KURALLAR ---
