@@ -67,37 +67,36 @@ def get_bot_username():
 # BÖLÜM A: TWITTER FETVA MANTIĞI (ESKİ SİSTEM - KATI VE KISA)
 # =====================================================
 def get_fetva_twitter(soru, context=None):
-    prompt_text = f"Soru: {soru}"
-    if context: prompt_text += f"\n(Bağlam: '{context}')"
+    prompt_text = f"KULLANICI SORUSU: {soru}"
+    if context: prompt_text += f"\n(SORUNUN BAĞLAMI/ALINTILANAN TWEET: '{context}')"
 
-    # ESKİ KATI PROMPT (Dokunmayalım dediğiniz yapı)
     system_prompt = """
-    Sen bir Yorumcu değil, bir NAKİL UZMANISIN. Görevin Ehl-i Sünnet kaynaklarından "Mu'temed" (Güvenilir) görüşü olduğu gibi aktarmaktır.
+    Sen "X Kadısı" isminde, Fıkıh uzmanı bir botsun.
+    
+    GÖREVİN:
+    Gelen soruyu analiz et ve sadece o soruya cevap ver.
+    
+    --- ANAYASA (SADECE VE SADECE KONU EŞLEŞİRSE KULLAN) ---
+    Eğer soru aşağıdaki konulardan biriyle ilgiliyse, MUTLAKA bu şablonu kullan. 
+    EĞER SORU BAŞKA BİR KONUYSA (Örn: Faiz, Namaz, Oruç) BU MADDELERİ YOK SAY VE SORUYU CEVAPLA.
 
-    --- DİKKAT: EN SIK YAPILAN HATALAR VE DOĞRULARI (ANAYASA) ---
-    Aşağıdaki kurallara %100 uyacaksın. Asla aksini iddia etme:
-
-    1. [KONU: KADINA DOKUNMAK]
+    1. [KONU: KADINA DOKUNMAK İSE]
        - HANEFİ: Ten tene değmek abdesti ASLA BOZMAZ.
        - ŞAFİİ: Namahrem kadına ten tene değmek abdesti KESİN BOZAR.
 
-    2. [KONU: KAN AKMASI]
-       - HANEFİ: Vücudun herhangi bir yerinden kan akarsa abdest BOZULUR.
-       - ŞAFİİ: Ön ve arka mahal hariç, vücuttan kan akması abdesti BOZMAZ.
+    2. [KONU: KAN AKMASI İSE]
+       - HANEFİ: Kan akarsa abdest BOZULUR.
+       - ŞAFİİ: Ön/arka mahal hariç kan akması abdesti BOZMAZ.
     
-    3. [KONU: KUSMAK]
+    3. [KONU: KUSMAK İSE]
        - HANEFİ: Ağız dolusu kusmak bozar.
        - ŞAFİİ: Kusmak abdesti bozmaz.
 
-    --- FORMAT ---
-    GİRİŞ: [Başlık yok. Doğrudan özet hüküm.]
-    
-    [Hanefi]: [Hüküm] (Kaynak: İbn Abidin/Hidaye)
-    [Şafiî]: [Hüküm] (Kaynak: Nevevi/Minhac)
-    [Mâlikî]: [Hüküm]
-    [Hanbelî]: [Hüküm]
-
-    SONUÇ: "⚠️ Bu genel bilgilendirmedir. Lütfen @abdulazizguven'e danışın."
+    --- FORMAT KURALLARI ---
+    1. Soru "Faiz, Banka, Pos Cihazı" gibiyse, Anayasayı boşver, o konunun fıkhi hükmünü ver.
+    2. Kısa, net ve Twitter limitine uygun yaz.
+    3. Mezhep farkı varsa belirt yoksa "Cumhura göre/Dört mezhebe göre" de.
+    4. SONUÇ: "⚠️ Detay için hocalarımıza danışın."
     """
 
     try:
@@ -107,23 +106,13 @@ def get_fetva_twitter(soru, context=None):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text}
             ],
-            max_tokens=800, 
-            temperature=0.0 # Sıfır Tolerans
+            max_tokens=600, 
+            temperature=0.1 # Sıfırı 0.1 yaptık ki soruyu analiz etsin, ezberi bıraksın.
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
         logger.error(f"Grok Hatası: {e}")
         return None
-
-def get_context(tweet):
-    if not tweet.referenced_tweets: return None
-    for ref in tweet.referenced_tweets:
-        if ref.type in ['replied_to', 'quoted']:
-            try:
-                p = client.get_tweet(ref.id, tweet_fields=["text"])
-                if p.data: return p.data.text
-            except: pass
-    return None
 
 # =====================================================
 # BÖLÜM B: WEB SİTESİ FETVA MANTIĞI (YENİ SİSTEM - DETAYLI VE HOCA)
