@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import threading
 import tweepy
-import requests 
+from openai import OpenAI  # <--- EKLENDİ: Kodun çalışması için şart
 import time
 import os
 import logging
@@ -23,11 +23,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- KEY KONTROL ---
+# --- KEY KONTROL VE CLIENT BAŞLATMA ---
 if not os.environ.get("GROK_API_KEY"):
     logger.error("❌ HATA: GROK_API_KEY eksik! Render ayarlarını kontrol edin.")
 
-# --- TWITTER CLIENT BAŞLATMA ---
+# Grok Client (Eksikti, eklendi)
+grok_client = OpenAI(
+    api_key=os.environ.get("GROK_API_KEY"),
+    base_url="https://api.x.ai/v1",
+    timeout=60.0,
+    max_retries=3
+)
+
+# Twitter Client
 client = tweepy.Client(
     bearer_token=os.environ.get("BEARER_TOKEN"),
     consumer_key=os.environ.get("CONSUMER_KEY"),
@@ -58,105 +66,118 @@ def get_fetva_twitter(soru, context=None):
     prompt_text = f"KULLANICI SORUSU: {soru}"
     if context: prompt_text += f"\n(BAĞLAM: '{context}')"
 
+    # SENİN İSTEDİĞİN PROMPT (DEĞİŞTİRİLMEDİ)
     system_prompt = """
-    Sen "X Kadısı" isminde, Ehl-i Sünnet kaynaklarına (İbn Abidin, Nevevi) hakim bir Fıkıh Uzmanısın.
-    GÖREVİN: Sorulan meseleyi fıkıh kitaplarından tara, mezheplerin detaylarını analiz et.
-    
-    --- FORMAT ---
-    (Kısa giriş)
-    🟦 HANEFİ: ... (Kaynak: ...)
-    🟪 ŞAFİİ: ... (Kaynak: ...)
-    🟩 MALİKİ: ... (Kaynak: ...)
-    🟧 HANBELİ: ... (Kaynak: ...)
-    ⚠️ SONUÇ: @abdulazizguven'e danışın.
+    Sen "X Kadısı" isminde, Ehl-i Sünnet kaynaklarına (İbn Abidin, Nevevi, İbn Kudame) hakim bir Fıkıh Uzmanısın.
 
-    DİKKAT: Yemin Kefaretinde önce Doyurmak, yoksa Oruç gelir. Sıralamaya uy.
+    GÖREVİN:
+    Sorulan meseleyi fıkıh kitaplarından tara, mezheplerin detaylarını analiz et ve görsel olarak şık bir formatta sun.
+
+    --- GÖRSEL VE FORMAT KURALLARI (ÇOK ÖNEMLİ) ---
+    1. ASLA "[Giriş Cümlesi]" veya "[Özet]" gibi şablon başlıkları YAZMA. Doğrudan konuya gir.
+    2. Mezhep başlıklarını mutlaka şu EMOJİLERLE ve BÜYÜK HARFLE yaz:
+       🟦 HANEFİ: [Hüküm]
+       🟪 ŞAFİİ: [Hüküm]
+       🟩 MALİKİ: [Hüküm]
+       🟧 HANBELİ: [Hüküm]
+    3. Kaynakları her satırın sonuna parantez içinde ekle. (Örn: Kaynak: İbn Abidin)
+
+    --- FIKIH METODOLOJİSİ (HATA YAPMA!) ---
+    1. TERTİP (SIRALAMA) ESASTIR:
+       - Özellikle "Yemin Kefareti" gibi konularda Kur'an'daki sıralamaya uy.
+       - ÖNCE: Doyurmak veya Giydirmek (Bunlar asıldır).
+       - SONRA: Eğer bunlara maddi güç yetmezse Oruç tutulur. (Bot olarak "İstediğini seçer" deme, oruç fakirin seçeneğidir).
+    2. ŞARTLAR:
+       - Hanefi'de yemin kefareti orucu "Peş peşe" şarttır.
+       - Şafii'de "Peş peşe" şart değildir (Ayrı ayrı tutulabilir).
+
+    --- ÇIKTI ŞABLONU ---
+    (Konuya dair kısa, net bir giriş paragrafı...)
+
+    🟦 HANEFİ: ... (Kaynak: ...)
+    
+    🟪 ŞAFİİ: ... (Kaynak: ...)
+    
+    🟩 MALİKİ: ... (Kaynak: ...)
+    
+    🟧 HANBELİ: ... (Kaynak: ...)
+
+    ⚠️ SONUÇ: Bu genel bilgilendirmedir. Lütfen @abdulazizguven'e danışın.
     """
 
-    api_key = os.environ.get("GROK_API_KEY")
-    if not api_key: return None
-
     try:
-        # GROK-3 KULLANIYORUZ
-        payload = {
-            "model": "grok-3", # <-- GÜNCELLENDİ
-            "messages": [
+        r = grok_client.chat.completions.create(
+            model="grok-3", 
+            messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text}
             ],
-            "max_tokens": 1200,
-            "temperature": 0.1
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-
-        r = requests.post("https://api.x.ai/v1/chat/completions", json=payload, headers=headers, timeout=50)
-        
-        if r.status_code == 200:
-            return r.json()['choices'][0]['message']['content'].strip()
-        else:
-            logger.error(f"❌ API HATASI (Twitter): {r.text}")
-            return None
-
+            max_tokens=1200, 
+            temperature=0.1 
+        )
+        return r.choices[0].message.content.strip()
     except Exception as e:
-        logger.error(f"Bağlantı Hatası: {e}")
+        logger.error(f"Grok Hatası: {e}")
         return None
 
 # =====================================================
 # BÖLÜM B: WEB SİTESİ FETVA (Grok-3)
 # =====================================================
 def get_fetva_web(soru):
+    # SENİN İSTEDİĞİN PROMPT (DEĞİŞTİRİLMEDİ)
     system_prompt = """
-    KİMLİK: Sen "Fukaha Meclisi"nin yapay zeka asistanısın. 4 Hak Mezhebe hakimsin.
+    KİMLİK:
+    Sen "Fukaha Meclisi"nin yapay zeka asistanısın. Ehl-i Sünnet ve'l Cemaat çizgisinde, 4 Hak Mezhebe (Hanefi, Şafii, Maliki, Hanbeli) hakim, ilmi derinliği olan bir fıkıh alimisin.
+
+    --- DAVRANIŞ MODLARI ---
     
-    MOD 1: SOHBET (Selam verilirse al).
-    MOD 2: FIKIH (Detaylı, Kaynaklı, 4 Mezhepli cevap ver).
+    MOD 1: SOHBET (Sadece "Selam, Naber" denirse)
+    - "Selamun Aleyküm" denirse: "Ve Aleyküm Selam ve Rahmetullah kıymetli kardeşim." de.
+    - "Nasılsın" denirse: "Hamdolsun, hizmetinizdeyiz. Sizler nasılsınız?" de.
 
-    FORMAT:
-    "Selamun Aleyküm..."
-    <br><br><b>📌 ÖZET HÜKÜM:</b><br>...
+    MOD 2: FIKHİ SORULAR (ASIL GÖREV - BU FORMATI KULLAN)
+    Eğer kullanıcı dini bir soru sorarsa, aşağıdaki şablonu BİREBİR uygula:
+
+    --- CEVAP ŞABLONU (HTML KULLAN) ---
+    
+    "Selamun Aleyküm kıymetli kardeşim," (Alt satıra geç)
+    "Sorunuzun cevabını Ehl-i Sünnet kaynaklarımız ışığında arz edeyim:"
+
+    <br><br><b>📌 ÖZET HÜKÜM:</b><br>
+    (Sorunun cevabını burada net bir cümleyle ver. Örn: "Bu durum abdesti bozar.")
+
+    <br><br><b>📖 DELİLLER VE İZAH:</b><br>
+    (Konuyu Ayet ve Hadislerle, fıkhi mantığıyla detaylandır.)
+
     <br><br><b>⚖️ MEZHEP GÖRÜŞLERİ:</b><br>
-    <b>🟦 HANEFİ:</b> ... (Kaynak: ...)<br>
-    <b>🟪 ŞAFİİ:</b> ... (Kaynak: ...)<br>
-    <b>🟩 MALİKİ:</b> ... (Kaynak: ...)<br>
-    <b>🟧 HANBELİ:</b> ... (Kaynak: ...)<br>
+    <b>🟦 HANEFİ:</b> [Hüküm ve Detay] (Kaynak: İbn Abidin/Hidaye)<br>
+    <b>🟪 ŞAFİİ:</b> [Hüküm ve Detay] (Kaynak: Nevevi/Minhac)<br>
+    <b>🟩 MALİKİ:</b> [Hüküm] (Kaynak: Müdevvene)<br>
+    <b>🟧 HANBELİ:</b> [Hüküm] (Kaynak: İbn Kudame)<br>
+
     <br><br><b>⚠️ SONUÇ VE TAVSİYE:</b><br>
-    Kıymetli kardeşim, bu bilgiler genel fıkhi kaidelere dayanmaktadır. Durumunuzun özel detayları için lütfen sitemizdeki <b>"Soru Sor"</b> butonunu kullanarak fetva alınız.
+    Kıymetli kardeşim, bu bilgiler genel fıkhi kaidelere dayanmaktadır. Durumunuzun özel detayları veya şüpheli noktalar için lütfen sitemizdeki <b>"Soru Sor"</b> butonunu kullanarak veya doğrudan <b>Abdülaziz Güven</b> hocamıza ulaşarak fetva alınız.<br>
+    Rabbim ilminizi artırsın. (Amin).
+
+    --- KURALLAR ---
+    1. 4 Mezhebi de mutlaka yaz. Bilmiyorsan "Kaynaklarda bu konuda cumhurun görüşü şöyledir" de.
+    2. Kaynak isimlerini (Kitap adı) parantez içinde mutlaka belirt.
+    3. Üslubun nazik ve kuşatıcı olsun.
     """
-
-    api_key = os.environ.get("GROK_API_KEY")
-    if not api_key: return "Sistem hatası: API Key bulunamadı."
-
     try:
-        # GROK-3 KULLANIYORUZ
-        payload = {
-            "model": "grok-3", # <-- GÜNCELLENDİ
-            "messages": [
+        r = grok_client.chat.completions.create(
+            model="grok-3", 
+            messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": soru}
             ],
-            "max_tokens": 2000,
-            "temperature": 0.2
-        }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-
-        r = requests.post("https://api.x.ai/v1/chat/completions", json=payload, headers=headers, timeout=60)
-
-        if r.status_code == 200:
-            return r.json()['choices'][0]['message']['content']
-        else:
-            logger.error(f"❌ API HATASI (Web): {r.status_code} - {r.text}")
-            return "Şu an teknik bir yoğunluk var, lütfen biraz sonra tekrar deneyiniz."
-
+            max_tokens=2000, 
+            temperature=0.2 
+        )
+        return r.choices[0].message.content
     except Exception as e:
-        logger.error(f"❌ KRİTİK BAĞLANTI HATASI: {str(e)}")
-        return "Bağlantı hatası oluştu."
+        logger.error(f"Grok Web Hatası: {e}")
+        return "Şu an kaynaklara ulaşmakta güçlük çekiyorum."
 
 # --- DÖNGÜLER VE ROUTES ---
 
