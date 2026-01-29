@@ -1,0 +1,5 @@
+tweepy
+openai
+flask
+flask-cors
+gunicorn
