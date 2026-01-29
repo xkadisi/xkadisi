@@ -31,7 +31,7 @@ if not os.environ.get("GROK_API_KEY"):
 grok_client = OpenAI(
     api_key=os.environ.get("GROK_API_KEY"),
     base_url="https://api.x.ai/v1",
-    timeout=60.0,
+    timeout=90.0,
     max_retries=3
 )
 
