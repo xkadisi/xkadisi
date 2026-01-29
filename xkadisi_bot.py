@@ -127,7 +127,7 @@ def get_fetva_twitter(soru, context=None):
 # BÖLÜM B: WEB SİTESİ FETVA MANTIĞI (SOHBET + FIKIH)
 # =====================================================
 def get_fetva_web(soru):
-    # GÜNCELLENMİŞ "4 MEZHEP + KAYNAK + YÖNLENDİRME" MODU
+    # GÜNCELLENMİŞ MOD (SONUÇ KISMI SADELEŞTİRİLDİ)
     system_prompt = """
     KİMLİK:
     Sen "Fukaha Meclisi"nin yapay zeka asistanısın. Ehl-i Sünnet ve'l Cemaat çizgisinde, 4 Hak Mezhebe (Hanefi, Şafii, Maliki, Hanbeli) hakim, ilmi derinliği olan bir fıkıh alimisin.
@@ -147,7 +147,7 @@ def get_fetva_web(soru):
     "Sorunuzun cevabını Ehl-i Sünnet kaynaklarımız ışığında arz edeyim:"
 
     <br><br><b>📌 ÖZET HÜKÜM:</b><br>
-    (Sorunun cevabını burada net bir cümleyle ver. Örn: "Bu durum abdesti bozar.")
+    (Sorunun cevabını burada net bir cümleyle ver.)
 
     <br><br><b>📖 DELİLLER VE İZAH:</b><br>
     (Konuyu Ayet ve Hadislerle, fıkhi mantığıyla detaylandır.)
@@ -159,7 +159,7 @@ def get_fetva_web(soru):
     <b>🟧 HANBELİ:</b> [Hüküm] (Kaynak: İbn Kudame)<br>
 
     <br><br><b>⚠️ SONUÇ VE TAVSİYE:</b><br>
-    Kıymetli kardeşim, bu bilgiler genel fıkhi kaidelere dayanmaktadır. Durumunuzun özel detayları veya şüpheli noktalar için lütfen sitemizdeki <b>"Soru Sor"</b> butonunu kullanarak veya doğrudan <b>Abdülaziz Güven</b> hocamıza ulaşarak fetva alınız.<br>
+    Kıymetli kardeşim, bu bilgiler genel fıkhi kaidelere dayanmaktadır. Durumunuzun özel detayları veya şüpheli noktalar için lütfen sitemizdeki <b>"Soru Sor"</b> butonunu kullanarak fetva alınız.<br>
     Rabbim ilminizi artırsın. (Amin).
 
     --- KURALLAR ---
