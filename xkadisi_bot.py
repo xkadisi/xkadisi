@@ -248,10 +248,15 @@ def sor():
     return jsonify({"cevap": cevap})
 
 # =====================================================
-# BÖLÜM E: BAŞLATMA (ENTRY POINT)
+# BÖLÜM E: BAŞLATMA (ENTRY POINT) - GÜNCELLENDİ
 # =====================================================
+
+# DİKKAT: Gunicorn kullandığımız için Thread'i dışarı aldık.
+# Böylece sunucu başladığı an Twitter botu da otomatik başlar.
+t = threading.Thread(target=twitter_loop_thread)
+t.start()
+
 if __name__ == '__main__':
-    t = threading.Thread(target=twitter_loop_thread)
-    t.start()
+    # Burası sadece bilgisayarında test ederken çalışır
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
