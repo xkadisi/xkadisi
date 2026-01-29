@@ -1,6 +1,7 @@
 tweepy
-openai
+openai>=1.12.0
 flask
 flask-cors
 gunicorn
 gevent
+
