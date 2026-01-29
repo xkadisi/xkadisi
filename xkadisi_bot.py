@@ -251,10 +251,7 @@ def sor():
 # BÖLÜM E: BAŞLATMA (ENTRY POINT)
 # =====================================================
 if __name__ == '__main__':
-    # 1. Twitter Botunu Arka Planda Başlat
     t = threading.Thread(target=twitter_loop_thread)
     t.start()
-    
-    # 2. Web Sunucusunu Başlat (Render bunu bekler)
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
