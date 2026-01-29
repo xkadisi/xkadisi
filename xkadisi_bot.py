@@ -49,8 +49,8 @@ client = tweepy.Client(
 grok_client = OpenAI(
     api_key=os.environ.get("GROK_API_KEY"),
     base_url="https://api.x.ai/v1",
-    timeout=60.0, # <-- EKLENDİ: 60 saniye boyunca pes etme bekle!
-    max_retries=3 # <-- EKLENDİ: Hata alırsan 3 kere daha dene
+    timeout=30.0,    # 30 saniye yeterli, fazlası sistemi yorar
+    max_retries=5    # Hata alırsan 5 kere dene
 )
 
 # --- HAFIZA ---
