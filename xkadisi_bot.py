@@ -68,53 +68,52 @@ def get_bot_username():
 # =====================================================
 def get_fetva_twitter(soru, context=None):
     prompt_text = f"KULLANICI SORUSU: {soru}"
-    if context: prompt_text += f"\n(SORUNUN BAĞLAMI: '{context}')"
+    if context: prompt_text += f"\n(BAĞLAM: '{context}')"
 
+    # BU PROMPT, O SEVDİĞİN "KEFİR CEVABI" FORMATINI ZORUNLU KILAR
     system_prompt = """
-    Sen "X Kadısı" isminde, Fıkıh uzmanı bir botsun.
-    GÖREVİN: Gelen soruyu analiz et ve sadece o soruya cevap ver.
+    Sen "X Kadısı" isminde, Ehl-i Sünnet kaynaklarından nakil yapan bir fıkıh botusun.
     
-    --- ANAYASA (SADECE KONU EŞLEŞİRSE KULLAN) ---
-    Eğer soru "Abdest, Kan, Kadın, Kusmak" ile ilgiliyse bu şablonu kullan. 
-    Eğer soru başka bir konuysa (Faiz, Ticaret vb.) BU MADDELERİ YOK SAY.
+    GÖREVİN:
+    Sorulan soruyu ASLA genel geçer cümlelerle cevaplama. Mutlaka MEZHEPLERE ayırarak ve (Kaynak) belirterek cevap ver.
 
-    1. [KONU: KADINA DOKUNMAK İSE]
-       - HANEFİ: Ten tene değmek abdesti ASLA BOZMAZ.
-       - ŞAFİİ: Namahrem kadına ten tene değmek abdesti KESİN BOZAR.
+    --- CEVAP FORMATI (BUNA %100 UY) ---
+    [Giriş Cümlesi] (Konuyu kısaca özetle)
 
-    2. [KONU: KAN AKMASI İSE]
-       - HANEFİ: Kan akarsa abdest BOZULUR.
-       - ŞAFİİ: Ön/arka mahal hariç kan akması abdesti BOZMAZ.
+    [Hanefi]: [Hüküm] (Kaynak: İbn Abidin/Hidaye)
+    [Şafiî]: [Hüküm] (Kaynak: Nevevi/Minhac)
+    [Mâlikî]: [Hüküm] (Kaynak: Müdevvene)
+    [Hanbelî]: [Hüküm] (Kaynak: İbn Kudame)
+
+    SONUÇ: Bu genel bilgilendirmedir. Lütfen @abdulazizguven'e danışın.
+
+    --- ÖZEL KURALLAR ---
+    1. KADINA DOKUNMAK sorulursa:
+       - Hanefi: Bozmaz.
+       - Şafii: Bozar.
+    2. KAN AKMASI sorulursa:
+       - Hanefi: Bozar.
+       - Şafii: Bozmaz.
     
-    3. [KONU: KUSMAK İSE]
-       - HANEFİ: Ağız dolusu kusmak bozar.
-       - ŞAFİİ: Kusmak abdesti bozmaz.
-
-    FORMAT: Kısa, net ve Twitter limitine uygun yaz.
-    SONUÇ: "⚠️ Detay için hocalarımıza danışın."
+    DİKKAT:
+    - Eğer mezhepler arasında görüş birliği varsa bile formatı bozma. "[Hanefi]: Caizdir. [Şafiî]: Caizdir." şeklinde ayrı ayrı yaz.
+    - Kaynak isimlerini o mezhebin en bilinen kitaplarından seç.
     """
 
     try:
         r = grok_client.chat.completions.create(
             model="grok-3", 
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt_text}],
-            max_tokens=600, temperature=0.1
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_text}
+            ],
+            max_tokens=1000, 
+            temperature=0.1 # Sıfıra yakın tutuyoruz ki formatı bozmasın
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
         logger.error(f"Grok Hatası: {e}")
         return None
-
-def get_context(tweet):
-    if not tweet.referenced_tweets: return None
-    for ref in tweet.referenced_tweets:
-        if ref.type in ['replied_to', 'quoted']:
-            try:
-                p = client.get_tweet(ref.id, tweet_fields=["text"])
-                if p.data: return p.data.text
-            except: pass
-    return None
-
 # =====================================================
 # BÖLÜM B: WEB SİTESİ FETVA MANTIĞI (SOHBET + FIKIH)
 # =====================================================
