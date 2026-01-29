@@ -43,9 +43,14 @@ client = tweepy.Client(
     wait_on_rate_limit=True
 )
 
+# --- CLIENT BAŞLATMA ---
+# (Tweepy kısmı aynı kalsın, sadece grok_client'ı değiştir)
+
 grok_client = OpenAI(
     api_key=os.environ.get("GROK_API_KEY"),
-    base_url="https://api.x.ai/v1"
+    base_url="https://api.x.ai/v1",
+    timeout=60.0, # <-- EKLENDİ: 60 saniye boyunca pes etme bekle!
+    max_retries=3 # <-- EKLENDİ: Hata alırsan 3 kere daha dene
 )
 
 # --- HAFIZA ---
@@ -111,7 +116,7 @@ def get_fetva_twitter(soru, context=None):
 
     try:
         r = grok_client.chat.completions.create(
-            model="grok-3", 
+            model="grok-2-1212", # <-- GÜNCELLENDİ: En stabil sürüm budur.
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text}
@@ -160,7 +165,7 @@ def get_fetva_web(soru):
     """
     try:
         r = grok_client.chat.completions.create(
-            model="grok-3", # DİKKAT: Eğer grok-3 çalışmıyorsa burayı "grok-2-1212" veya "grok-beta" yap
+            model="grok-2-1212", # <-- GÜNCELLENDİ: En stabil sürüm budur.
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": soru}
