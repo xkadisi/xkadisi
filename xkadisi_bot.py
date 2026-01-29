@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import threading
 import tweepy
-import requests  # <--- ARTIK SADECE BU VAR
+import requests 
 import time
 import os
 import logging
@@ -24,7 +24,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- KEY KONTROL ---
-# Grok API Key kontrolü
 if not os.environ.get("GROK_API_KEY"):
     logger.error("❌ HATA: GROK_API_KEY eksik! Render ayarlarını kontrol edin.")
 
@@ -40,7 +39,7 @@ client = tweepy.Client(
 
 BOT_ID = 1997244309243060224
 ANSWERED_TWEET_IDS = set()
-BOT_USERNAME = "XKadisi" # Varsayılan
+BOT_USERNAME = "XKadisi" 
 
 def get_bot_username():
     global BOT_USERNAME
@@ -53,7 +52,7 @@ def get_bot_username():
     return BOT_USERNAME
 
 # =====================================================
-# BÖLÜM A: TWITTER FETVA (REQUESTS İLE)
+# BÖLÜM A: TWITTER FETVA (Grok-3)
 # =====================================================
 def get_fetva_twitter(soru, context=None):
     prompt_text = f"KULLANICI SORUSU: {soru}"
@@ -78,9 +77,9 @@ def get_fetva_twitter(soru, context=None):
     if not api_key: return None
 
     try:
-        # REQUESTS KULLANIYORUZ (Connection Error Vermez)
+        # GROK-3 KULLANIYORUZ
         payload = {
-            "model": "grok-2-1212",
+            "model": "grok-3", # <-- GÜNCELLENDİ
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_text}
@@ -107,7 +106,7 @@ def get_fetva_twitter(soru, context=None):
         return None
 
 # =====================================================
-# BÖLÜM B: WEB SİTESİ FETVA (REQUESTS İLE)
+# BÖLÜM B: WEB SİTESİ FETVA (Grok-3)
 # =====================================================
 def get_fetva_web(soru):
     system_prompt = """
@@ -132,9 +131,9 @@ def get_fetva_web(soru):
     if not api_key: return "Sistem hatası: API Key bulunamadı."
 
     try:
-        # REQUESTS KULLANIYORUZ
+        # GROK-3 KULLANIYORUZ
         payload = {
-            "model": "grok-2-1212",
+            "model": "grok-3", # <-- GÜNCELLENDİ
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": soru}
@@ -147,7 +146,6 @@ def get_fetva_web(soru):
             "Content-Type": "application/json"
         }
 
-        # Timeout 60 saniye
         r = requests.post("https://api.x.ai/v1/chat/completions", json=payload, headers=headers, timeout=60)
 
         if r.status_code == 200:
@@ -211,7 +209,7 @@ def twitter_loop_thread():
 
 @app.route('/', methods=['GET'])
 def home():
-    return "X Kadısı & Fukaha Botu (Requests Modu) Aktif! 🚀"
+    return "X Kadısı & Fukaha Botu (Grok-3) Aktif! 🚀"
 
 @app.route('/sor', methods=['POST'])
 def sor():
