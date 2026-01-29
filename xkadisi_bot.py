@@ -10,9 +10,9 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-# --- 1. WEB SUNUCUSU AYARLARI (FLASK) ---
+# --- 1. WEB SUNUCUSU AYARLARI ---
 app = Flask(__name__)
-CORS(app) # Web sitenden gelen isteklere izin ver
+CORS(app) 
 
 # --- LOGLAMA ---
 logging.basicConfig(
@@ -64,12 +64,13 @@ def get_bot_username():
         return "XKadisi"
 
 # =====================================================
-# BÖLÜM A: TWITTER FETVA MANTIĞI (SIFIR TOLERANS)
+# BÖLÜM A: TWITTER FETVA MANTIĞI (ESKİ SİSTEM - KATI VE KISA)
 # =====================================================
 def get_fetva_twitter(soru, context=None):
     prompt_text = f"Soru: {soru}"
     if context: prompt_text += f"\n(Bağlam: '{context}')"
 
+    # ESKİ KATI PROMPT (Dokunmayalım dediğiniz yapı)
     system_prompt = """
     Sen bir Yorumcu değil, bir NAKİL UZMANISIN. Görevin Ehl-i Sünnet kaynaklarından "Mu'temed" (Güvenilir) görüşü olduğu gibi aktarmaktır.
 
@@ -77,34 +78,24 @@ def get_fetva_twitter(soru, context=None):
     Aşağıdaki kurallara %100 uyacaksın. Asla aksini iddia etme:
 
     1. [KONU: KADINA DOKUNMAK]
-       - HANEFİ: Ten tene değmek abdesti ASLA BOZMAZ. (İster şehvetli ister şehvetsiz). Sadece mezi/meni gelirse bozulur.
-       - ŞAFİİ: Namahrem kadına ten tene değmek abdesti KESİN BOZAR. (Şehvet olsun olmasın).
-       - MALİKİ/HANBELİ: Sadece şehvet/lezzet duyulursa bozar.
+       - HANEFİ: Ten tene değmek abdesti ASLA BOZMAZ.
+       - ŞAFİİ: Namahrem kadına ten tene değmek abdesti KESİN BOZAR.
 
     2. [KONU: KAN AKMASI]
-       - HANEFİ: Vücudun herhangi bir yerinden kan, irin çıkıp akarsa abdest BOZULUR.
-       - ŞAFİİ: Ön ve arka mahal (avret) hariç, vücuttan kan akması abdesti ASLA BOZMAZ.
+       - HANEFİ: Vücudun herhangi bir yerinden kan akarsa abdest BOZULUR.
+       - ŞAFİİ: Ön ve arka mahal hariç, vücuttan kan akması abdesti BOZMAZ.
     
     3. [KONU: KUSMAK]
        - HANEFİ: Ağız dolusu kusmak bozar.
-       - ŞAFİİ: Kusmak (necis olsa da) abdesti bozmaz.
-
-    4. [KONU: DEVE ETİ]
-       - HANBELİ: Deve eti yemek abdesti bozar.
-       - DİĞER 3 MEZHEP: Bozmaz.
-
-    --- GÖREV TALİMATI ---
-    1. Mezhepleri birbirinden "Çelik Duvarlarla" ayır. Birinin hükmünü diğerine kopyalama.
-    2. Eğer bir konuda emin değilsen uydurma, "Bu konuda ihtilaf vardır, hocaya danışın" de.
-    3. Kullanıcının dilini tespit et ve o dilde cevap ver.
+       - ŞAFİİ: Kusmak abdesti bozmaz.
 
     --- FORMAT ---
     GİRİŞ: [Başlık yok. Doğrudan özet hüküm.]
     
     [Hanefi]: [Hüküm] (Kaynak: İbn Abidin/Hidaye)
     [Şafiî]: [Hüküm] (Kaynak: Nevevi/Minhac)
-    [Mâlikî]: [Hüküm] (Kaynak: Müdevvene)
-    [Hanbelî]: [Hüküm] (Kaynak: İbn Kudame)
+    [Mâlikî]: [Hüküm]
+    [Hanbelî]: [Hüküm]
 
     SONUÇ: "⚠️ Bu genel bilgilendirmedir. Lütfen @abdulazizguven'e danışın."
     """
@@ -117,7 +108,7 @@ def get_fetva_twitter(soru, context=None):
                 {"role": "user", "content": prompt_text}
             ],
             max_tokens=800, 
-            temperature=0.0
+            temperature=0.0 # Sıfır Tolerans
         )
         return r.choices[0].message.content.strip()
     except Exception as e:
@@ -135,19 +126,38 @@ def get_context(tweet):
     return None
 
 # =====================================================
-# BÖLÜM B: WEB SİTESİ FETVA MANTIĞI (NAZİK FORMAT)
+# BÖLÜM B: WEB SİTESİ FETVA MANTIĞI (YENİ SİSTEM - DETAYLI VE HOCA)
 # =====================================================
 def get_fetva_web(soru):
+    # YENİ DETAYLI PROMPT (Web sitesi için özel)
     system_prompt = """
-    Sen "Fukaha Meclisi" sitesinin yapay zeka asistanısın. 
-    Görevin: Web sitesi ziyaretçisine nazik, detaylı ve HTML formatına uygun (paragraf başları vb.) cevap vermek.
-    
-    --- ANAYASA (SIFIR HATA KURALLARI - WEB) ---
-    1. KADINA DOKUNMAK: Hanefi'de BOZMAZ. Şafii'de BOZAR.
-    2. KAN AKMASI: Hanefi'de BOZAR. Şafii'de BOZMAZ.
-    3. KUSMAK: Hanefi'de BOZAR. Şafii'de BOZMAZ.
-    
-    SONUÇ: "⚠️ Bu genel bilgilendirmedir. Lütfen hocalarımıza danışın." ile bitir.
+    KİMLİK:
+    Sen "Fukaha Meclisi"nin yapay zeka asistanısın. Ehl-i Sünnet ve'l Cemaat çizgisinde, Hanefi ve Şafii fıkhına hakim, ilmi derinliği olan, nazik bir fıkıh alimisin.
+
+    GÖREVİN:
+    Kullanıcının sorusunu geçiştirmeden; Ayet, Hadis ve Fıkıh kaidelerine dayanarak DETAYLICA cevaplamaktır.
+
+    --- ANAYASA (BU KURALLARIN DIŞINA ASLA ÇIKMA) ---
+    1. [KONU: KADINA DOKUNMAK]
+       - HANEFİ: Ten tene değmek abdesti ASLA BOZMAZ.
+       - ŞAFİİ: Namahrem kadına ten tene değmek abdesti KESİN BOZAR.
+    2. [KONU: KAN AKMASI]
+       - HANEFİ: Vücuttan kan akması abdesti BOZAR.
+       - ŞAFİİ: Kan akması abdesti BOZMAZ.
+    3. [KONU: KUSMAK]
+       - HANEFİ: Ağız dolusu kusmak bozar.
+       - ŞAFİİ: Kusmak abdesti bozmaz.
+
+    CEVAPLAMA FORMATI (HTML ETİKETLERİ KULLAN):
+    1. GİRİŞ: "Selamun Aleyküm kıymetli kardeşim," gibi sıcak bir giriş.
+    2. NET HÜKÜM: Sorunun cevabını başta net ver.
+    3. DELİLLER VE İZAH: Konuyu detaylandır. "Efendimiz (s.a.v) şöyle buyurmuştur..." diyerek ilmi izah yap.
+    4. MEZHEP FARKLARI: Hanefi ve Şafii arasındaki farkı mutlaka <b>Hanefi:</b> ve <b>Şafii:</b> şeklinde ayır.
+    5. SONUÇ VE DUA: Dua ile bitir.
+
+    ÜSLUP:
+    - Robot gibi değil, bir insan gibi sıcak konuş.
+    - Kısa cevap verme, konuyu etraflıca anlat.
     """
     try:
         r = grok_client.chat.completions.create(
@@ -156,18 +166,17 @@ def get_fetva_web(soru):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": soru}
             ],
-            max_tokens=1000, 
-            temperature=0.0
+            max_tokens=2000, # <--- Uzun cevap için limit artırıldı
+            temperature=0.1  # <--- Biraz daha akıcı konuşması için
         )
         return r.choices[0].message.content
     except Exception as e:
-        return "Şu an cevap veremiyorum."
+        return "Şu an kaynaklara ulaşmakta güçlük çekiyorum."
 
 # =====================================================
 # BÖLÜM C: TWITTER DÖNGÜSÜ (THREAD)
 # =====================================================
 def twitter_loop_thread():
-    """Bu fonksiyon ana programdan bağımsız çalışır"""
     global ANSWERED_TWEET_IDS, BOT_USERNAME
     logger.info("🚀 Twitter Modülü (Thread) Başlatıldı...")
     
@@ -175,7 +184,6 @@ def twitter_loop_thread():
 
     # Geçmişi Tara
     try:
-        logger.info("📂 Geçmiş cevaplar taranıyor...")
         my_tweets = client.get_users_tweets(id=BOT_ID, max_results=50, tweet_fields=["referenced_tweets"])
         if my_tweets.data:
             for t in my_tweets.data:
@@ -186,8 +194,6 @@ def twitter_loop_thread():
     while True:
         try:
             query = f"@{BOT_USERNAME} -is:retweet -from:{BOT_USERNAME}"
-            # logger.info(f"🔎 Tweet Araması...") # Log kirliliği olmasın diye kapattım
-            
             tweets = client.search_recent_tweets(
                 query=query, max_results=50, 
                 expansions=["referenced_tweets.id", "author_id"],
@@ -211,7 +217,7 @@ def twitter_loop_thread():
 
                     logger.info(f"👁️ TWEET İŞLENİYOR: {raw[:30]}...")
                     
-                    # TWITTER ÖZEL CEVAP FONKSİYONU
+                    # BURADA ESKİ KATI FONKSİYONU ÇAĞIRIYORUZ
                     f = get_fetva_twitter(raw if raw else "Hüküm nedir?", ctx)
                     
                     if f:
@@ -226,7 +232,6 @@ def twitter_loop_thread():
         except Exception as e:
             logger.error(f"Döngü Hatası: {e}")
 
-        # Güvenli Hız
         time.sleep(200)
 
 # =====================================================
@@ -243,20 +248,17 @@ def sor():
     if not soru: return jsonify({"cevap": "Soru yok"}), 400
     
     logger.info(f"🌍 WEB İSTEĞİ: {soru[:20]}...")
-    # WEB ÖZEL CEVAP FONKSİYONU
+    
+    # BURADA YENİ DETAYLI FONKSİYONU ÇAĞIRIYORUZ
     cevap = get_fetva_web(soru)
     return jsonify({"cevap": cevap})
 
 # =====================================================
-# BÖLÜM E: BAŞLATMA (ENTRY POINT) - GÜNCELLENDİ
+# BÖLÜM E: BAŞLATMA (ENTRY POINT)
 # =====================================================
-
-# DİKKAT: Gunicorn kullandığımız için Thread'i dışarı aldık.
-# Böylece sunucu başladığı an Twitter botu da otomatik başlar.
 t = threading.Thread(target=twitter_loop_thread)
 t.start()
 
 if __name__ == '__main__':
-    # Burası sadece bilgisayarında test ederken çalışır
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
